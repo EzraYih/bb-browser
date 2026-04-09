@@ -10,6 +10,7 @@
 import { request as httpRequest } from "node:http";
 import WebSocket from "ws";
 import { TabStateManager } from "./tab-state.js";
+import { ensureChromeCdpAvailable } from "./browser-recovery.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,6 +73,10 @@ function normalizeHeaders(headers: unknown): Record<string, string> | undefined 
   );
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ---------------------------------------------------------------------------
 // CdpConnection
 // ---------------------------------------------------------------------------
@@ -94,7 +99,9 @@ export class CdpConnection {
   currentTargetId: string | undefined;
 
   private connectionPromise: Promise<void> | null = null;
+  private recoveryPromise: Promise<void> | null = null;
   private _connected = false;
+  private shuttingDown = false;
 
   /** Last connection error (for diagnostics in 503 responses). */
   lastError: string | null = null;
@@ -142,6 +149,7 @@ export class CdpConnection {
   }
 
   private async doConnect(): Promise<void> {
+    this.clearSessionState();
     const versionData = (await fetchJson(
       `http://${this.host}:${this.port}/json/version`,
     )) as JsonObject;
@@ -176,14 +184,30 @@ export class CdpConnection {
   /** Wait until CDP connection is established (for two-phase startup). */
   waitUntilReady(): Promise<void> {
     if (this._connected) return Promise.resolve();
-    if (this.lastError) return Promise.reject(new Error(this.lastError));
+    if (this.connectionPromise) return this.connectionPromise;
+    if (this.recoveryPromise) return this.recoveryPromise;
+    if (this.lastError) return this.ensureConnected();
     return new Promise<void>((resolve, reject) => {
       this.readyWaiters.push({ resolve, reject });
     });
   }
 
+  async ensureConnected(): Promise<void> {
+    if (this.connected) return;
+    if (this.connectionPromise) return this.connectionPromise;
+    if (this.recoveryPromise) return this.recoveryPromise;
+
+    this.recoveryPromise = this.recoverConnection();
+    try {
+      await this.recoveryPromise;
+    } finally {
+      this.recoveryPromise = null;
+    }
+  }
+
   /** Gracefully close the CDP connection. */
   disconnect(): void {
+    this.shuttingDown = true;
     if (this.socket) {
       try {
         this.socket.close();
@@ -191,6 +215,7 @@ export class CdpConnection {
     }
     this.socket = null;
     this._connected = false;
+    this.lastError = "CDP connection closed";
 
     for (const p of this.pending.values()) {
       p.reject(new Error("CDP connection closed"));
@@ -202,6 +227,7 @@ export class CdpConnection {
       waiter.reject(new Error("CDP connection closed before ready"));
     }
     this.readyWaiters = [];
+    this.clearSessionState();
   }
 
   // ---------------------------------------------------------------------------
@@ -298,19 +324,56 @@ export class CdpConnection {
       this._connected = false;
       this.socket = null;
       this.lastError = "CDP WebSocket closed unexpectedly";
+      this.clearSessionState();
       for (const p of this.pending.values()) {
         p.reject(new Error("CDP connection closed"));
       }
       this.pending.clear();
-
-      const closeErr = new Error(this.lastError);
-      for (const waiter of this.readyWaiters) {
-        waiter.reject(closeErr);
+      if (!this.shuttingDown) {
+        void this.ensureConnected().catch((error) => {
+          this.lastError = error instanceof Error ? error.message : String(error);
+        });
       }
-      this.readyWaiters = [];
     });
 
     ws.on("error", () => {});
+  }
+
+  private clearSessionState(): void {
+    this.sessions.clear();
+    this.attachedTargets.clear();
+    this.currentTargetId = undefined;
+    this.tabManager.clearAll();
+  }
+
+  private async recoverConnection(): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const available = await ensureChromeCdpAvailable(this.host, this.port);
+      if (!available) {
+        lastError = new Error(`Chrome not connected (CDP at ${this.host}:${this.port})`);
+        await sleep(Math.min(1000 * attempt, 3000));
+        continue;
+      }
+
+      try {
+        await this.connect();
+        this.lastError = null;
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        this.lastError = lastError.message;
+        await sleep(Math.min(1000 * attempt, 3000));
+      }
+    }
+
+    const failure = lastError || new Error(`Chrome not connected (CDP at ${this.host}:${this.port})`);
+    for (const waiter of this.readyWaiters) {
+      waiter.reject(failure);
+    }
+    this.readyWaiters = [];
+    throw failure;
   }
 
   // ---------------------------------------------------------------------------

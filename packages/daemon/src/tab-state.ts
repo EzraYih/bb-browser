@@ -330,6 +330,13 @@ export class TabStateManager {
     return Array.from(this.tabs.values());
   }
 
+  /** Clear all tab state (used when the browser process is replaced). */
+  clearAll(): void {
+    this.tabs.clear();
+    this.shortToTarget.clear();
+    this.targetToShort.clear();
+  }
+
   /** Get tab count. */
   get tabCount(): number {
     return this.tabs.size;

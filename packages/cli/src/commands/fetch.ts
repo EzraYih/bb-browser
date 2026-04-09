@@ -21,6 +21,7 @@ export interface FetchOptions {
   body?: string;
   headers?: string;
   output?: string;
+  binary?: boolean;
   tabId?: string | number;
 }
 
@@ -89,6 +90,22 @@ function buildFetchScript(url: string, options: FetchOptions): string {
         headers: ${headersExpr}${hasBody ? `,\n        body: ${JSON.stringify(options.body)}` : ""}
       });
       const contentType = resp.headers.get('content-type') || '';
+      if (${options.binary ? "true" : "false"}) {
+        const blob = await resp.blob();
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error || new Error('Failed to read binary response'));
+          reader.readAsDataURL(blob);
+        });
+        const bodyBase64 = String(dataUrl).split(',', 2)[1] || '';
+        return JSON.stringify({
+          status: resp.status,
+          contentType,
+          bodyBase64,
+          binary: true
+        });
+      }
       let body;
       if (contentType.includes('application/json') && resp.status !== 204) {
         try { body = await resp.json(); } catch { body = await resp.text(); }
@@ -113,7 +130,7 @@ export async function fetchCommand(
   if (!url) {
     throw new Error(
       "缺少 URL 参数\n" +
-      "  用法: bb-browser fetch <url> [--json] [--method POST] [--body '{...}']\n" +
+      "  用法: bb-browser fetch <url> [--json] [--method POST] [--body '{...}'] [--output file] [--binary]\n" +
       "  示例: bb-browser fetch https://www.reddit.com/api/me.json --json"
     );
   }
@@ -152,7 +169,14 @@ export async function fetchCommand(
     throw new Error("Fetch 未返回结果");
   }
 
-  let result: { status?: number; contentType?: string; body?: unknown; error?: string };
+  let result: {
+    status?: number;
+    contentType?: string;
+    body?: unknown;
+    bodyBase64?: string;
+    binary?: boolean;
+    error?: string;
+  };
   try {
     result = typeof rawResult === "string" ? JSON.parse(rawResult) : rawResult as typeof result;
   } catch {
@@ -167,6 +191,12 @@ export async function fetchCommand(
   // 写文件
   if (options.output) {
     const { writeFileSync } = await import("node:fs");
+    if (options.binary || result.binary) {
+      const buffer = Buffer.from(result.bodyBase64 || "", "base64");
+      writeFileSync(options.output, buffer);
+      console.log(`已写入 ${options.output} (${result.status}, ${buffer.length} bytes)`);
+      return;
+    }
     const content = typeof result.body === "object"
       ? JSON.stringify(result.body, null, 2)
       : String(result.body);
@@ -176,6 +206,14 @@ export async function fetchCommand(
   }
 
   // 输出
+  if (options.binary || result.binary) {
+    console.log(JSON.stringify({
+      status: result.status,
+      contentType: result.contentType,
+      bodyBase64: result.bodyBase64 || "",
+    }, null, 2));
+    return;
+  }
   if (typeof result.body === "object") {
     console.log(JSON.stringify(result.body, null, 2));
   } else {

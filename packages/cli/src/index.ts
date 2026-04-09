@@ -77,7 +77,7 @@ bb-browser - AI Agent 浏览器自动化工具
   get text|url|title <ref>     获取页面内容
   screenshot [path]            截图
   eval "<js>"                  执行 JavaScript
-  fetch <url>                  带登录态的 HTTP 请求
+  fetch <url>                  带登录态的 HTTP 请求（支持 --output / --binary）
 
 标签页：
   tab [list|new|close|<n>]     管理标签页
@@ -99,6 +99,7 @@ bb-browser - AI Agent 浏览器自动化工具
   --port <n>           指定 Chrome CDP 端口
   --openclaw           优先复用 OpenClaw 浏览器实例
   --jq <expr>          对 JSON 输出应用 jq 过滤（直接作用于数据，跳过 id/success 信封）
+  --binary             fetch 命令按二进制读取响应，适合图片/视频下载
   -i, --interactive    只输出可交互元素（snapshot 命令）
   -c, --compact        移除空结构节点（snapshot 命令）
   -d, --depth <n>      限制树深度（snapshot 命令）
@@ -516,7 +517,7 @@ async function main(): Promise<void> {
         const fetchUrl = parsed.args[0];
         if (!fetchUrl) {
           console.error("[error] fetch: <url> is required.");
-          console.error("  Usage: bb-browser fetch <url> [--json] [--method POST] [--body '{...}']");
+          console.error("  Usage: bb-browser fetch <url> [--json] [--method POST] [--body '{...}'] [--output file] [--binary]");
           console.error("  Example: bb-browser fetch https://www.reddit.com/api/me.json --json");
           process.exit(1);
         }
@@ -529,12 +530,14 @@ async function main(): Promise<void> {
         const fetchHeaders = headersIdx >= 0 ? process.argv[headersIdx + 1] : undefined;
         const outputIdx = process.argv.findIndex(a => a === "--output");
         const fetchOutput = outputIdx >= 0 ? process.argv[outputIdx + 1] : undefined;
+        const fetchBinary = process.argv.includes("--binary");
         await fetchCommand(fetchUrl, {
           json: parsed.flags.json,
           method: fetchMethod,
           body: fetchBody,
           headers: fetchHeaders,
           output: fetchOutput,
+          binary: fetchBinary,
           tabId: globalTabId,
         });
         break;

@@ -221,6 +221,22 @@ function matchTabOrigin(tabUrl: string, domain: string): boolean {
   }
 }
 
+function scoreMatchingTab(tab: TabInfo): number {
+  let score = 0;
+  if (tab.active) score += 100;
+  if (tab.url && !/^about:blank$/i.test(tab.url)) score += 20;
+  if (tab.title && !/^(new tab|blank|about:blank)$/i.test(tab.title.trim())) score += 10;
+  if (tab.url.includes("/explore/")) score += 8;
+  if (tab.url.includes("/search_result")) score += 6;
+  return score;
+}
+
+function pickBestMatchingTab(tabs: TabInfo[], domain: string): TabInfo | undefined {
+  return tabs
+    .filter((tab) => matchTabOrigin(tab.url, domain))
+    .sort((left, right) => scoreMatchingTab(right) - scoreMatchingTab(left))[0];
+}
+
 // ── 子命令 ──────────────────────────────────────────────────────
 
 function siteList(options: SiteOptions): void {
@@ -710,9 +726,7 @@ async function siteRun(
     const listResp: Response = await sendCommand(listReq);
 
     if (listResp.success && listResp.data?.tabs) {
-      const matchingTab = listResp.data.tabs.find((tab: TabInfo) =>
-        matchTabOrigin(tab.url, site.domain)
-      );
+      const matchingTab = pickBestMatchingTab(listResp.data.tabs as TabInfo[], site.domain);
       if (matchingTab) {
         targetTabId = matchingTab.tabId;
       }
