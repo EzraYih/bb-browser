@@ -16,12 +16,14 @@ import type { Request } from "@bb-browser/shared";
 import { COMMAND_TIMEOUT, DAEMON_PORT } from "@bb-browser/shared";
 import { CdpConnection } from "./cdp-connection.js";
 import { dispatchRequest } from "./command-dispatch.js";
+import type { ActivityTracker } from "./activity-tracker.js";
 
 export interface HttpServerOptions {
   host?: string;
   port?: number;
   token?: string;
   cdp: CdpConnection;
+  activityTracker: ActivityTracker;
   onShutdown?: () => void;
 }
 
@@ -31,6 +33,7 @@ export class HttpServer {
   private readonly port: number;
   private readonly token: string | null;
   private readonly cdp: CdpConnection;
+  private readonly activityTracker: ActivityTracker;
   private readonly onShutdown?: () => void;
   private startTime = 0;
 
@@ -39,6 +42,7 @@ export class HttpServer {
     this.port = options.port ?? DAEMON_PORT;
     this.token = options.token ?? null;
     this.cdp = options.cdp;
+    this.activityTracker = options.activityTracker;
     this.onShutdown = options.onShutdown;
   }
 
@@ -122,6 +126,7 @@ export class HttpServer {
   // ---------------------------------------------------------------------------
 
   private async handleCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const releaseCommand = this.activityTracker.beginCommand();
     try {
       const body = await this.readBody(req);
       const request = JSON.parse(body) as Request;
@@ -163,6 +168,8 @@ export class HttpServer {
         success: false,
         error: error instanceof Error ? error.message : "Invalid request",
       });
+    } finally {
+      releaseCommand();
     }
   }
 
@@ -184,6 +191,7 @@ export class HttpServer {
       running: true,
       cdpConnected: this.cdp.connected,
       uptime: this.uptime,
+      activeCommands: this.activityTracker.count,
       currentSeq: this.cdp.tabManager.currentSeq(),
       currentTargetId: this.cdp.currentTargetId,
       tabs,

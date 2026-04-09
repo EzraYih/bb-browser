@@ -11,6 +11,7 @@ import { request as httpRequest } from "node:http";
 import WebSocket from "ws";
 import { TabStateManager } from "./tab-state.js";
 import { ensureChromeCdpAvailable } from "./browser-recovery.js";
+import type { ActivityTracker } from "./activity-tracker.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,6 +103,7 @@ export class CdpConnection {
   private recoveryPromise: Promise<void> | null = null;
   private _connected = false;
   private shuttingDown = false;
+  private readonly activityTracker?: ActivityTracker;
 
   /** Last connection error (for diagnostics in 503 responses). */
   lastError: string | null = null;
@@ -109,10 +111,16 @@ export class CdpConnection {
   /** Resolvers for commands queued before CDP is ready. */
   private readyWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
 
-  constructor(host: string, port: number, tabManager: TabStateManager) {
+  constructor(
+    host: string,
+    port: number,
+    tabManager: TabStateManager,
+    activityTracker?: ActivityTracker,
+  ) {
     this.host = host;
     this.port = port;
     this.tabManager = tabManager;
+    this.activityTracker = activityTracker;
   }
 
   get connected(): boolean {
@@ -196,6 +204,9 @@ export class CdpConnection {
     if (this.connected) return;
     if (this.connectionPromise) return this.connectionPromise;
     if (this.recoveryPromise) return this.recoveryPromise;
+    if (!this.shouldAutoRecover()) {
+      throw new Error(this.lastError || "CDP connection closed while daemon is idle");
+    }
 
     this.recoveryPromise = this.recoverConnection();
     try {
@@ -329,7 +340,7 @@ export class CdpConnection {
         p.reject(new Error("CDP connection closed"));
       }
       this.pending.clear();
-      if (!this.shuttingDown) {
+      if (!this.shuttingDown && this.shouldAutoRecover()) {
         void this.ensureConnected().catch((error) => {
           this.lastError = error instanceof Error ? error.message : String(error);
         });
@@ -346,10 +357,17 @@ export class CdpConnection {
     this.tabManager.clearAll();
   }
 
+  private shouldAutoRecover(): boolean {
+    return this.activityTracker?.hasActiveCommands() ?? true;
+  }
+
   private async recoverConnection(): Promise<void> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= 5; attempt += 1) {
+      if (!this.shouldAutoRecover()) {
+        throw new Error(this.lastError || "CDP connection closed while daemon is idle");
+      }
       const available = await ensureChromeCdpAvailable(this.host, this.port);
       if (!available) {
         lastError = new Error(`Chrome not connected (CDP at ${this.host}:${this.port})`);

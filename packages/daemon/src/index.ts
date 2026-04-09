@@ -19,6 +19,7 @@ import { DAEMON_PORT, DAEMON_HOST } from "@bb-browser/shared";
 import { HttpServer } from "./http-server.js";
 import { CdpConnection } from "./cdp-connection.js";
 import { TabStateManager } from "./tab-state.js";
+import { ActivityTracker } from "./activity-tracker.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -197,6 +198,7 @@ async function main(): Promise<void> {
 
   // Create tab state manager and CDP connection
   const tabManager = new TabStateManager();
+  const activityTracker = new ActivityTracker();
   let cdpEndpoint: { host: string; port: number };
 
   try {
@@ -208,7 +210,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const cdp = new CdpConnection(cdpEndpoint.host, cdpEndpoint.port, tabManager);
+  const cdp = new CdpConnection(
+    cdpEndpoint.host,
+    cdpEndpoint.port,
+    tabManager,
+    activityTracker,
+  );
 
   // Graceful shutdown handler (guarded against double-call)
   let shuttingDown = false;
@@ -228,6 +235,7 @@ async function main(): Promise<void> {
     port: options.port,
     token: options.token,
     cdp,
+    activityTracker,
     onShutdown: shutdown,
   });
 
