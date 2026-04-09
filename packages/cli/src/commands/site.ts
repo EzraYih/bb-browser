@@ -17,6 +17,7 @@ import { generateId, type Request, type Response, type TabInfo } from "@bb-brows
 import { handleJqResponse, sendCommand } from "../client.js";
 import { getHistoryDomains } from "../history-sqlite.js";
 import { ensureDaemonRunning } from "../daemon-manager.js";
+import { isInternalSiteFile, loadSiteScriptBody } from "../site-source.js";
 import { readFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
@@ -166,7 +167,7 @@ function scanSites(dir: string, source: "local" | "community"): SiteMeta[] {
       const fullPath = join(currentDir, entry.name);
       if (entry.isDirectory() && !entry.name.startsWith(".")) {
         walk(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith(".js")) {
+      } else if (entry.isFile() && entry.name.endsWith(".js") && !isInternalSiteFile(entry.name)) {
         const meta = parseSiteMeta(fullPath, source);
         if (meta) sites.push(meta);
       }
@@ -529,19 +530,68 @@ async function siteRun(
   // 解析参数
   const argNames = Object.keys(site.args);
   const argMap: Record<string, string> = {};
+  const unknownFlags = new Set<string>();
+  const missingFlagValues = new Set<string>();
 
   // 过滤掉 --flag value 对，收集位置参数
   const positionalArgs: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--")) {
-      const flagName = args[i].slice(2);
-      if (flagName in site.args && args[i + 1]) {
-        argMap[flagName] = args[i + 1];
-        i++; // 跳过值
+    const arg = args[i];
+    if (arg.startsWith("--")) {
+      // 支持 --flag=value 和 --flag value 两种格式
+      const eqIdx = arg.indexOf("=");
+      if (eqIdx > 0) {
+        const flagName = arg.slice(2, eqIdx);
+        const flagValue = arg.slice(eqIdx + 1);
+        if (flagName in site.args) {
+          argMap[flagName] = flagValue;
+        } else {
+          unknownFlags.add(`--${flagName}`);
+        }
+      } else {
+        const flagName = arg.slice(2);
+        const nextArg = args[i + 1];
+        if (flagName in site.args) {
+          if (nextArg && !nextArg.startsWith("--")) {
+            argMap[flagName] = nextArg;
+            i++; // 跳过值
+          } else {
+            missingFlagValues.add(`--${flagName}`);
+          }
+        } else {
+          unknownFlags.add(`--${flagName}`);
+          if (nextArg && !nextArg.startsWith("--")) {
+            i++; // 跳过值，避免误当作位置参数
+          }
+        }
       }
     } else {
-      positionalArgs.push(args[i]);
+      positionalArgs.push(arg);
     }
+  }
+
+  if (unknownFlags.size > 0) {
+    const unknownText = Array.from(unknownFlags).join(", ");
+    if (options.json) {
+      exitJsonError(`unknown argument(s): ${unknownText}`, {
+        example: site.example,
+      });
+    }
+    console.error(`[error] site ${name}: unknown argument(s): ${unknownText}.`);
+    if (site.example) console.error(`  Example: ${site.example}`);
+    process.exit(1);
+  }
+
+  if (missingFlagValues.size > 0) {
+    const missingText = Array.from(missingFlagValues).join(", ");
+    if (options.json) {
+      exitJsonError(`missing value for option(s): ${missingText}`, {
+        example: site.example,
+      });
+    }
+    console.error(`[error] site ${name}: missing value for option(s): ${missingText}.`);
+    if (site.example) console.error(`  Example: ${site.example}`);
+    process.exit(1);
   }
 
   // 位置参数按 argNames 顺序填入（跳过已通过 --flag 提供的）
@@ -582,10 +632,7 @@ async function siteRun(
   }
 
   // 读取并解析 JS
-  const jsContent = readFileSync(site.filePath, "utf-8");
-
-  // 移除 /* @meta ... */ 块，保留函数体
-  const jsBody = jsContent.replace(/\/\*\s*@meta[\s\S]*?\*\//, "").trim();
+  const jsBody = loadSiteScriptBody(site.filePath);
 
   // 构造执行脚本
   const argsJson = JSON.stringify(argMap);
