@@ -682,7 +682,7 @@ async function siteRun(
     if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
       const errObj = parsed as { error: string; hint?: string };
       const checkText = `${errObj.error} ${errObj.hint || ""}`;
-      const isAuthError = /401|403|unauthorized|forbidden|not.?logged|login.?required|sign.?in|auth/i.test(checkText);
+      const isAuthError = /401|403|unauthorized|forbidden|not.?logged|login.?required|sign.?in|auth|未登录|请先登录|登录失效|重新登录|安全验证|扫码验证|验证码/i.test(checkText);
       const loginHint = isAuthError && site.domain
         ? `Please log in to https://${site.domain} in your OpenClaw browser first, then retry.`
         : undefined;
@@ -784,7 +784,7 @@ async function siteRun(
 
     // 检测是否为登录问题（检查 error 和 hint 文本）
     const checkText = `${errObj.error} ${errObj.hint || ""}`;
-    const isAuthError = /401|403|unauthorized|forbidden|not.?logged|login.?required|sign.?in|auth/i.test(checkText);
+    const isAuthError = /401|403|unauthorized|forbidden|not.?logged|login.?required|sign.?in|auth|未登录|请先登录|登录失效|重新登录|安全验证|扫码验证|验证码/i.test(checkText);
     const loginHint = isAuthError && site.domain
       ? `Please log in to https://${site.domain} in your browser first, then retry.`
       : undefined;
