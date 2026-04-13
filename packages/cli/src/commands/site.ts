@@ -86,6 +86,62 @@ function exitJsonError(error: string, extra: Record<string, unknown> = {}): neve
   process.exit(1);
 }
 
+interface AdapterErrorResult {
+  error: string;
+  hint?: string;
+}
+
+function isGenericAuthError(error: string): boolean {
+  return /(?:^|\b)(401|403|unauthorized|forbidden)(?:\b|$)|not.?logged(?:.?in)?|login.?required|sign.?in/i.test(error);
+}
+
+function resolveAdapterErrorHint(
+  errorResult: AdapterErrorResult,
+  domain: string,
+  browserLabel: "browser" | "OpenClaw browser",
+): string | undefined {
+  const adapterHint = typeof errorResult.hint === "string" && errorResult.hint.trim()
+    ? errorResult.hint
+    : undefined;
+  if (adapterHint) {
+    return adapterHint;
+  }
+  if (domain && isGenericAuthError(errorResult.error)) {
+    return `Please log in to https://${domain} in your ${browserLabel} first, then retry.`;
+  }
+  return undefined;
+}
+
+function exitAdapterError(
+  params: {
+    responseId: string;
+    siteName: string;
+    site: SiteMeta;
+    options: SiteOptions;
+    errorResult: AdapterErrorResult;
+    browserLabel: "browser" | "OpenClaw browser";
+  },
+): never {
+  const hint = resolveAdapterErrorHint(params.errorResult, params.site.domain, params.browserLabel);
+  const reportHint = `If this is an adapter bug, report via: gh issue create --repo epiral/bb-sites --title "[${params.siteName}] <description>" OR: bb-browser site github/issue-create epiral/bb-sites --title "[${params.siteName}] <description>"`;
+
+  if (params.options.json) {
+    console.log(JSON.stringify({
+      id: params.responseId,
+      success: false,
+      error: params.errorResult.error,
+      hint,
+      reportHint,
+    }));
+  } else {
+    console.error(`[error] site ${params.siteName}: ${params.errorResult.error}`);
+    if (hint) console.error(`  Hint: ${hint}`);
+    console.error(`  Report: gh issue create --repo epiral/bb-sites --title "[${params.siteName}] ..."`);
+    console.error(`     or: bb-browser site github/issue-create epiral/bb-sites --title "[${params.siteName}] ..."`);
+  }
+  process.exit(1);
+}
+
 /**
  * 从 JS 文件的 /* @meta JSON * / 块解析元数据
  */
@@ -680,24 +736,14 @@ async function siteRun(
     const parsed = ocEvaluate(targetId, wrappedFn);
 
     if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
-      const errObj = parsed as { error: string; hint?: string };
-      const checkText = `${errObj.error} ${errObj.hint || ""}`;
-      const isAuthError = /401|403|unauthorized|forbidden|not.?logged|login.?required|sign.?in|auth|未登录|请先登录|登录失效|重新登录|安全验证|扫码验证|验证码/i.test(checkText);
-      const loginHint = isAuthError && site.domain
-        ? `Please log in to https://${site.domain} in your OpenClaw browser first, then retry.`
-        : undefined;
-      const hint = loginHint || errObj.hint;
-      const reportHint = `If this is an adapter bug, report via: gh issue create --repo epiral/bb-sites --title "[${name}] <description>" OR: bb-browser site github/issue-create epiral/bb-sites --title "[${name}] <description>"`;
-
-      if (options.json) {
-        console.log(JSON.stringify({ id: "openclaw", success: false, error: errObj.error, hint, reportHint }));
-      } else {
-        console.error(`[error] site ${name}: ${errObj.error}`);
-        if (hint) console.error(`  Hint: ${hint}`);
-        console.error(`  Report: gh issue create --repo epiral/bb-sites --title "[${name}] ..."`);
-        console.error(`     or: bb-browser site github/issue-create epiral/bb-sites --title "[${name}] ..."`);
-      }
-      process.exit(1);
+      exitAdapterError({
+        responseId: "openclaw",
+        siteName: name,
+        site,
+        options,
+        errorResult: parsed as AdapterErrorResult,
+        browserLabel: "OpenClaw browser",
+      });
     }
 
     if (options.jq) {
@@ -780,26 +826,14 @@ async function siteRun(
 
   // 检查 adapter 返回的 error
   if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
-    const errObj = parsed as { error: string; hint?: string };
-
-    // 检测是否为登录问题（检查 error 和 hint 文本）
-    const checkText = `${errObj.error} ${errObj.hint || ""}`;
-    const isAuthError = /401|403|unauthorized|forbidden|not.?logged|login.?required|sign.?in|auth|未登录|请先登录|登录失效|重新登录|安全验证|扫码验证|验证码/i.test(checkText);
-    const loginHint = isAuthError && site.domain
-      ? `Please log in to https://${site.domain} in your browser first, then retry.`
-      : undefined;
-    const hint = loginHint || errObj.hint;
-    const reportHint = `If this is an adapter bug, report via: gh issue create --repo epiral/bb-sites --title "[${name}] <description>" OR: bb-browser site github/issue-create epiral/bb-sites --title "[${name}] <description>"`;
-
-    if (options.json) {
-      console.log(JSON.stringify({ id: evalReq.id, success: false, error: errObj.error, hint, reportHint }));
-    } else {
-      console.error(`[error] site ${name}: ${errObj.error}`);
-      if (hint) console.error(`  Hint: ${hint}`);
-      console.error(`  Report: gh issue create --repo epiral/bb-sites --title "[${name}] ..."`);
-      console.error(`     or: bb-browser site github/issue-create epiral/bb-sites --title "[${name}] ..."`);
-    }
-    process.exit(1);
+    exitAdapterError({
+      responseId: evalReq.id,
+      siteName: name,
+      site,
+      options,
+      errorResult: parsed as AdapterErrorResult,
+      browserLabel: "browser",
+    });
   }
 
   if (options.jq) {
