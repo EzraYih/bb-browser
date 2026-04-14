@@ -60,6 +60,17 @@ bb-browser site recommend     # see which adapters match your browsing habits
 bb-browser site zhihu/hot     # go
 ```
 
+### Xiaohongshu Export Stack (`feature/xhs-export`)
+
+This fork's `feature/xhs-export` branch is the runtime layer used by `bb-xhs-export`.
+
+- Tested pairing:
+  - `bb-browser`: version `0.11.3` on branch `feature/xhs-export`
+  - `bb-sites`: branch `feature/xhs-export` checked out directly under `~/.bb-browser/bb-sites`
+  - `bb-xhs-export`: current `main` branch
+- This stack provides the Xiaohongshu workflow primitives used by the exporter, including `search-page`, `note-detail`, `notes-chunk`, and `comments-chunk`.
+- If you are using this stack, do not overwrite the local adapter repo with a community `bb-browser site update` flow. Pull the `bb-sites` fork directly so the export-oriented Xiaohongshu adapters stay aligned with this branch.
+
 ### OpenClaw (no extension needed)
 
 If you use [OpenClaw](https://openclaw.ai), bb-browser runs directly through OpenClaw's built-in browser — no Chrome extension or daemon required:

@@ -60,6 +60,17 @@ bb-browser site recommend     # 看看哪些和你的浏览习惯匹配
 bb-browser site zhihu/hot     # 开搞
 ```
 
+### 小红书导出配套栈（`feature/xhs-export`）
+
+这个 fork 的 `feature/xhs-export` 分支，是 `bb-xhs-export` 当前配套使用的运行时层。
+
+- 当前已验证组合：
+  - `bb-browser`：`0.11.3` 版本，分支 `feature/xhs-export`
+  - `bb-sites`：分支 `feature/xhs-export`，直接放在 `~/.bb-browser/bb-sites`
+  - `bb-xhs-export`：当前 `main` 分支
+- 这套组合提供了小红书导出工作流依赖的原语，包括 `search-page`、`note-detail`、`notes-chunk`、`comments-chunk`。
+- 如果你在使用这套导出栈，不要再走社区版的 `bb-browser site update` 覆盖本地适配器仓库；请直接对 `bb-sites` fork 仓库执行 `git pull`，保证导出专用的小红书适配器和当前分支保持一致。
+
 ### OpenClaw（无需安装扩展）
 
 如果你使用 [OpenClaw](https://openclaw.ai)，bb-browser 可以直接通过 OpenClaw 内置浏览器运行，不需要额外安装 Chrome 扩展或 daemon：
