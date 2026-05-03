@@ -42,6 +42,8 @@ export type ActionType =
 export interface Request {
   /** 请求唯一标识 */
   id: string;
+  /** 请求级命令超时（毫秒），未传时使用默认值 */
+  timeoutMs?: number;
   /** 操作类型 */
   action: ActionType;
   /** 目标 URL（open 操作时必填） */

@@ -130,6 +130,10 @@ export class HttpServer {
     try {
       const body = await this.readBody(req);
       const request = JSON.parse(body) as Request;
+      const effectiveTimeoutMs = Number.isFinite(request.timeoutMs)
+        && Number(request.timeoutMs) > 0
+        ? Math.floor(Number(request.timeoutMs))
+        : COMMAND_TIMEOUT;
 
       // Wait for CDP to be ready (two-phase startup)
       if (!this.cdp.connected) {
@@ -137,7 +141,7 @@ export class HttpServer {
           await Promise.race([
             this.cdp.waitUntilReady(),
             new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error("CDP connection timeout")), COMMAND_TIMEOUT),
+              setTimeout(() => reject(new Error("CDP connection timeout")), effectiveTimeoutMs),
             ),
           ]);
         } catch {
@@ -156,7 +160,7 @@ export class HttpServer {
 
       // Dispatch with timeout
       const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Command timeout")), COMMAND_TIMEOUT),
+        setTimeout(() => reject(new Error("Command timeout")), effectiveTimeoutMs),
       );
       const response = await Promise.race([
         dispatchRequest(this.cdp, request),

@@ -135,7 +135,13 @@ async function ensureDaemon(): Promise<void> {
 async function daemonCommand(request: Request): Promise<Response> {
   if (!cachedDaemonInfo) cachedDaemonInfo = await readDaemonJson();
   if (!cachedDaemonInfo) throw new Error("No daemon.json found. Is the daemon running?");
-  return httpJson<Response>("POST", "/command", cachedDaemonInfo, request, COMMAND_TIMEOUT);
+  const envTimeoutMs = Number.parseInt(process.env.BB_BROWSER_COMMAND_TIMEOUT_MS || "", 10);
+  const effectiveTimeoutMs = Number.isFinite(request.timeoutMs) && Number(request.timeoutMs) > 0
+    ? Number(request.timeoutMs)
+    : Number.isFinite(envTimeoutMs) && envTimeoutMs > 0
+      ? envTimeoutMs
+      : COMMAND_TIMEOUT;
+  return httpJson<Response>("POST", "/command", cachedDaemonInfo, request, effectiveTimeoutMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -357,10 +363,12 @@ function encodeOutput(value: unknown): Uint8Array {
 /** Run a site adapter via CLI */
 function runSiteCli(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("bb-browser", ["site", ...args], { timeout: 30000, encoding: "utf8" }, (err, stdout, stderr) => {
+    const envTimeoutMs = Number.parseInt(process.env.BB_BROWSER_COMMAND_TIMEOUT_MS || "", 10);
+    const execTimeoutMs = Number.isFinite(envTimeoutMs) && envTimeoutMs > 0 ? envTimeoutMs : 30000;
+    execFile("bb-browser", ["site", ...args], { timeout: execTimeoutMs, encoding: "utf8" }, (err, stdout, stderr) => {
       if (err) {
         const distPath = new URL("../dist/cli.js", import.meta.url).pathname;
-        execFile("node", [distPath, "site", ...args], { timeout: 30000, encoding: "utf8" }, (err2, stdout2, stderr2) => {
+        execFile("node", [distPath, "site", ...args], { timeout: execTimeoutMs, encoding: "utf8" }, (err2, stdout2, stderr2) => {
           if (err2) reject(new Error(stdout2.trim() || stderr2 || err2.message));
           else resolve(stdout2.trim());
         });

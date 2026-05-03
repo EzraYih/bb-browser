@@ -25,6 +25,20 @@ import { discoverCdpPort } from "./cdp-discovery.js";
 let cachedInfo: DaemonInfo | null = null;
 let daemonReady = false;
 
+function resolveCommandTimeoutMs(request?: Request): number {
+  if (typeof request?.timeoutMs === "number" && Number.isFinite(request.timeoutMs) && request.timeoutMs > 0) {
+    return request.timeoutMs;
+  }
+
+  const raw = process.env.BB_BROWSER_COMMAND_TIMEOUT_MS;
+  if (!raw) {
+    return COMMAND_TIMEOUT;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : COMMAND_TIMEOUT;
+}
+
 // ---------------------------------------------------------------------------
 // daemon.json helpers
 // ---------------------------------------------------------------------------
@@ -146,7 +160,7 @@ export async function daemonCommand(request: Request): Promise<Response> {
   if (!cachedInfo) {
     throw new Error("No daemon.json found. Is the daemon running?");
   }
-  return httpJson<Response>("POST", "/command", cachedInfo, request, COMMAND_TIMEOUT);
+  return httpJson<Response>("POST", "/command", cachedInfo, request, resolveCommandTimeoutMs(request));
 }
 
 /**

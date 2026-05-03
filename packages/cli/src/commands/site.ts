@@ -28,6 +28,13 @@ const LOCAL_SITES_DIR = join(BB_DIR, "sites");
 const COMMUNITY_SITES_DIR = join(BB_DIR, "bb-sites");
 const COMMUNITY_REPO = "https://github.com/epiral/bb-sites.git";
 
+function readCommandTimeoutMs(): number | undefined {
+  const raw = process.env.BB_BROWSER_COMMAND_TIMEOUT_MS;
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function checkCliUpdate(): void {
   try {
     const current = execSync("bb-browser --version", { timeout: 3000, stdio: ["pipe", "pipe", "pipe"] }).toString().trim();
@@ -790,7 +797,14 @@ async function siteRun(
   }
 
   // 执行
-  const evalReq: Request = { id: generateId(), action: "eval", script, tabId: targetTabId };
+  const commandTimeoutMs = readCommandTimeoutMs();
+  const evalReq: Request = {
+    id: generateId(),
+    action: "eval",
+    script,
+    tabId: targetTabId,
+    ...(commandTimeoutMs ? { timeoutMs: commandTimeoutMs } : {}),
+  };
   const evalResp: Response = await sendCommand(evalReq);
 
   if (!evalResp.success) {
