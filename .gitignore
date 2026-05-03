@@ -16,6 +16,7 @@ dist/
 .vscode/
 *.swp
 *.swo
+.kilo/
 
 # OS
 .DS_Store
