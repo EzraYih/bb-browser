@@ -1,21 +1,21 @@
 /**
- * bb-browser 共享常量
+ * Shared bb-browser constants.
  */
 
-/** Daemon HTTP 服务端口 */
+/** Daemon HTTP port. */
 export const DAEMON_PORT = 19824;
 
-/** Daemon 主机地址 */
+/** Daemon host. */
 export const DAEMON_HOST = "127.0.0.1";
 
-/** SSE 心跳间隔（毫秒） - 15秒确保 MV3 Service Worker 不休眠 */
-export const SSE_HEARTBEAT_INTERVAL = 15000; // 15 秒
+/** SSE heartbeat interval in milliseconds. */
+export const SSE_HEARTBEAT_INTERVAL = 15000;
 
-/** 命令执行超时时间（毫秒） */
-export const COMMAND_TIMEOUT = 30000; // 30 秒
+/** Command execution timeout in milliseconds. */
+export const COMMAND_TIMEOUT = 120000;
 
-/** SSE 重连延迟（毫秒） */
-export const SSE_RECONNECT_DELAY = 3000; // 3 秒
+/** SSE reconnect delay in milliseconds. */
+export const SSE_RECONNECT_DELAY = 3000;
 
-/** SSE 最大重连尝试次数 */
+/** Maximum SSE reconnect attempts. */
 export const SSE_MAX_RECONNECT_ATTEMPTS = 5;

@@ -220,6 +220,36 @@ function matchTabOrigin(tabUrl: string, domain: string): boolean {
   }
 }
 
+function normalizeTabUrlForMatch(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function pickPreferredSiteTab(
+  tabs: TabInfo[],
+  domain: string,
+  preferredUrl?: string,
+): TabInfo | undefined {
+  const sameDomainTabs = tabs.filter((tab) => matchTabOrigin(tab.url, domain));
+  if (sameDomainTabs.length === 0) {
+    return undefined;
+  }
+
+  const normalizedPreferredUrl = preferredUrl ? normalizeTabUrlForMatch(preferredUrl) : null;
+  if (normalizedPreferredUrl) {
+    const exactMatch = sameDomainTabs.find((tab) => normalizeTabUrlForMatch(tab.url) === normalizedPreferredUrl);
+    if (exactMatch) {
+      return exactMatch;
+    }
+  }
+
+  return sameDomainTabs[0];
+}
+
 // ── 子命令 ──────────────────────────────────────────────────────
 
 function siteList(options: SiteOptions): void {
@@ -661,11 +691,16 @@ async function siteRun(
   if (!targetTabId && site.domain) {
     const listReq: Request = { id: generateId(), action: "tab_list" };
     const listResp: Response = await sendCommand(listReq);
+    const preferredUrl = Object.values(argMap).find((value) => {
+      try {
+        return new URL(value).hostname === site.domain;
+      } catch {
+        return false;
+      }
+    });
 
     if (listResp.success && listResp.data?.tabs) {
-      const matchingTab = listResp.data.tabs.find((tab: TabInfo) =>
-        matchTabOrigin(tab.url, site.domain)
-      );
+      const matchingTab = pickPreferredSiteTab(listResp.data.tabs, site.domain, preferredUrl);
       if (matchingTab) {
         targetTabId = matchingTab.tabId;
       }
