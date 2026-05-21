@@ -241,7 +241,9 @@ export function pickPreferredSiteTab(
 
   const normalizedPreferredUrl = preferredUrl ? normalizeTabUrlForMatch(preferredUrl) : null;
   if (normalizedPreferredUrl) {
-    const exactMatch = sameDomainTabs.find((tab) => normalizeTabUrlForMatch(tab.url) === normalizedPreferredUrl);
+    const exactMatch = [...sameDomainTabs]
+      .reverse()
+      .find((tab) => normalizeTabUrlForMatch(tab.url) === normalizedPreferredUrl);
     if (exactMatch) {
       return exactMatch;
     }
