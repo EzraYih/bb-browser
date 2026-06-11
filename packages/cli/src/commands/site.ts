@@ -563,13 +563,26 @@ async function siteRun(
   const argMap: Record<string, string> = {};
 
   // 过滤掉 --flag value 对，收集位置参数
+  /** 将 kebab-case 转为 snake_case（--time-budget-ms → time_budget_ms） */
+  function toSnakeCase(name: string): string {
+    return name.replace(/-/g, "_");
+  }
   const positionalArgs: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith("--")) {
       const flagName = args[i].slice(2);
-      if (flagName in site.args && args[i + 1]) {
-        argMap[flagName] = args[i + 1];
-        i++; // 跳过值
+      const snakeName = toSnakeCase(flagName);
+      const matchedArg = snakeName in site.args ? snakeName
+        : flagName in site.args ? flagName
+        : null;
+      if (matchedArg) {
+        // 布尔标志：无值或下一个参数是另一标志
+        if (!args[i + 1] || args[i + 1].startsWith("--")) {
+          argMap[matchedArg] = "true";
+        } else {
+          argMap[matchedArg] = args[i + 1];
+          i++;
+        }
       }
     } else {
       positionalArgs.push(args[i]);
