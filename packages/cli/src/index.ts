@@ -15,7 +15,7 @@ import { screenshotCommand } from "./commands/screenshot.js";
 import { waitCommand } from "./commands/wait.js";
 import { pressCommand } from "./commands/press.js";
 import { scrollCommand } from "./commands/scroll.js";
-import { backCommand, forwardCommand, refreshCommand } from "./commands/nav.js";
+import { backCommand, forwardCommand, refreshCommand, reloadCommand } from "./commands/nav.js";
 import { checkCommand, uncheckCommand } from "./commands/check.js";
 import { selectCommand } from "./commands/select.js";
 import { evalCommand } from "./commands/eval.js";
@@ -776,3 +776,4 @@ Full guide:        https://github.com/epiral/bb-sites/blob/main/SKILL.md`);
 }
 
 main().then(() => process.exit(0));
+
