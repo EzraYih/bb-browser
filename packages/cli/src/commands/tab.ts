@@ -120,8 +120,7 @@ export async function tabCommand(
   // If globalTabId is set and no explicit --id was provided, use globalTabId for close/select
   if (options.globalTabId && parsed.tabId === undefined && parsed.index === undefined) {
     if (parsed.action === "tab_close" || parsed.action === "tab_select") {
-      const numId = parseInt(options.globalTabId, 10);
-      parsed.tabId = isNaN(numId) ? options.globalTabId : numId;
+      parsed.tabId = options.globalTabId;
     }
   }
 
