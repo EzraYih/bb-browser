@@ -734,7 +734,24 @@ async function siteRun(
 
   // 执行
   const evalReq: Request = { id: generateId(), action: "eval", script, tabId: targetTabId };
-  const evalResp: Response = await sendCommand(evalReq);
+  let evalResp: Response;
+  try {
+    evalResp = await sendCommand(evalReq);
+  } catch (err) {
+    const rawMsg = err instanceof Error ? err.message : "Unknown error from daemon";
+    // Extract actual error from "Daemon HTTP XXX: {"success":false,"error":"..."}" wrapper
+    const colonIdx = rawMsg.indexOf(": ");
+    let errorMessage = rawMsg;
+    if (colonIdx !== -1) {
+      try {
+        const parsed = JSON.parse(rawMsg.slice(colonIdx + 2));
+        if (parsed && typeof parsed === "object" && "error" in parsed) {
+          errorMessage = String(parsed.error);
+        }
+      } catch {}
+    }
+    evalResp = { id: evalReq.id, success: false, error: errorMessage };
+  }
 
   if (!evalResp.success) {
     const hint = site.domain

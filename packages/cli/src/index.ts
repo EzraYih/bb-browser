@@ -761,7 +761,7 @@ Full guide:        https://github.com/epiral/bb-sites/blob/main/SKILL.md`);
     const message = error instanceof Error ? error.message : String(error);
 
     if (parsed.flags.json) {
-      console.log(
+      console.error(
         JSON.stringify({
           success: false,
           error: message,
