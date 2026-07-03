@@ -123,6 +123,7 @@ interface ParsedArgs {
     days?: number;
     jq?: string;
     openclaw?: boolean;
+    progress?: boolean;
     port?: number;
     since?: string;
   };
@@ -163,6 +164,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       }
     } else if (arg === "--openclaw") {
       result.flags.openclaw = true;
+    } else if (arg === "--progress") {
+      result.flags.progress = true;
     } else if (arg === "--port") {
       skipNext = true;
       const nextIdx = args.indexOf(arg) + 1;
@@ -664,6 +667,7 @@ async function main(): Promise<void> {
           days: parsed.flags.days,
           tabId: globalTabId,
           openclaw: parsed.flags.openclaw,
+          progress: parsed.flags.progress,
         });
         break;
       }

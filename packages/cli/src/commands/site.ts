@@ -43,6 +43,7 @@ export interface SiteOptions {
   days?: number;
   jq?: string;
   openclaw?: boolean;
+  progress?: boolean;
 }
 
 /** Adapter 参数定义 */
@@ -83,6 +84,20 @@ interface SiteRecommendation {
 function exitJsonError(error: string, extra: Record<string, unknown> = {}): never {
   console.log(JSON.stringify({ success: false, error, ...extra }, null, 2));
   process.exit(1);
+}
+
+/** NDJSON progress line — emitted during adapter execution */
+function outputProgressLine(data: Record<string, unknown>): void {
+  process.stdout.write(JSON.stringify({ type: "progress", ...data }) + "\n");
+}
+
+/** NDJSON result line — emitted once when adapter completes */
+function outputResultLine(success: boolean, data?: unknown, error?: string, hint?: string): void {
+  const payload: Record<string, unknown> = { type: "result", success };
+  if (success && data !== undefined) payload.data = data;
+  if (!success && error) payload.error = error;
+  if (hint) payload.hint = hint;
+  process.stdout.write(JSON.stringify(payload) + "\n");
 }
 
 /**
@@ -734,6 +749,53 @@ async function siteRun(
 
   // 执行
   const evalReq: Request = { id: generateId(), action: "eval", script, tabId: targetTabId };
+
+  // ── Progress polling: when --progress is set, poll console messages
+  // for __bb_progress lines while the eval is running ──
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let pollLastSeq = 0;
+
+  if (options.progress && targetTabId) {
+    // Get initial console seq to start polling from
+    try {
+      const initReq: Request = {
+        id: generateId(),
+        action: "console",
+        consoleCommand: "get",
+        tabId: targetTabId,
+        limit: 1,
+      };
+      const initResp: Response = await sendCommand(initReq);
+      pollLastSeq = (initResp.data?.cursor as number) ?? 0;
+    } catch {}
+
+    pollInterval = setInterval(async () => {
+      try {
+        const pollReq: Request = {
+          id: generateId(),
+          action: "console",
+          consoleCommand: "get",
+          tabId: targetTabId,
+          since: pollLastSeq,
+          filter: "__bb_progress",
+        };
+        const pollResp: Response = await sendCommand(pollReq);
+        const messages = pollResp.data?.consoleMessages ?? [];
+        for (const msg of messages) {
+          try {
+            const parsed = JSON.parse(msg.text);
+            if (parsed.__bb_progress) {
+              outputProgressLine(parsed.__bb_progress);
+            }
+          } catch {}
+        }
+        pollLastSeq = (pollResp.data?.cursor as number) ?? pollLastSeq;
+      } catch {
+        // Poll failure is non-fatal — retry next interval
+      }
+    }, 500);
+  }
+
   let evalResp: Response;
   try {
     evalResp = await sendCommand(evalReq);
@@ -753,10 +815,41 @@ async function siteRun(
     evalResp = { id: evalReq.id, success: false, error: errorMessage };
   }
 
+  // Stop polling and do a final flush
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+    // Final poll for any remaining progress messages
+    try {
+      const finalReq: Request = {
+        id: generateId(),
+        action: "console",
+        consoleCommand: "get",
+        tabId: targetTabId,
+        since: pollLastSeq,
+        filter: "__bb_progress",
+      };
+      const finalResp: Response = await sendCommand(finalReq);
+      const messages = finalResp.data?.consoleMessages ?? [];
+      for (const msg of messages) {
+        try {
+          const parsed = JSON.parse(msg.text);
+          if (parsed.__bb_progress) {
+            outputProgressLine(parsed.__bb_progress);
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
   if (!evalResp.success) {
     const hint = site.domain
       ? `Open https://${site.domain} in your browser, make sure you are logged in, then retry.`
       : undefined;
+    if (options.progress) {
+      outputResultLine(false, undefined, evalResp.error || "eval failed", hint);
+      process.exit(1);
+    }
     if (options.json) {
       console.log(JSON.stringify({ id: evalReq.id, success: false, error: evalResp.error || "eval failed", hint }));
     } else {
@@ -768,6 +861,10 @@ async function siteRun(
 
   const result = evalResp.data?.result;
   if (result === undefined || result === null) {
+    if (options.progress) {
+      outputResultLine(true, null);
+      return;
+    }
     if (options.json) {
       console.log(JSON.stringify({ id: evalReq.id, success: true, data: null }));
     } else {
@@ -797,6 +894,10 @@ async function siteRun(
     const hint = loginHint || errObj.hint;
     const reportHint = `If this is an adapter bug, report via: gh issue create --repo epiral/bb-sites --title "[${name}] <description>" OR: bb-browser site github/issue-create epiral/bb-sites --title "[${name}] <description>"`;
 
+    if (options.progress) {
+      outputResultLine(false, undefined, errObj.error, hint);
+      process.exit(1);
+    }
     if (options.json) {
       console.log(JSON.stringify({ id: evalReq.id, success: false, error: errObj.error, hint, reportHint }));
     } else {
@@ -808,6 +909,10 @@ async function siteRun(
     process.exit(1);
   }
 
+  if (options.progress) {
+    outputResultLine(true, parsed);
+    return;
+  }
   if (options.jq) {
     const { applyJq } = await import("../jq.js");
     // Tolerate ".data." prefix — Agent may copy from --json envelope structure
