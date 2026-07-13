@@ -92,12 +92,19 @@ function outputProgressLine(data: Record<string, unknown>): void {
 }
 
 /** NDJSON result line — emitted once when adapter completes */
-function outputResultLine(success: boolean, data?: unknown, error?: string, hint?: string): void {
+async function outputResultLine(success: boolean, data?: unknown, error?: string, hint?: string): Promise<void> {
   const payload: Record<string, unknown> = { type: "result", success };
   if (success && data !== undefined) payload.data = data;
   if (!success && error) payload.error = error;
   if (hint) payload.hint = hint;
-  process.stdout.write(JSON.stringify(payload) + "\n");
+  const json = JSON.stringify(payload) + "\n";
+  await new Promise<void>((resolve) => {
+    if (process.stdout.write(json)) {
+      resolve();
+    } else {
+      process.stdout.once("drain", resolve);
+    }
+  });
 }
 
 /**
@@ -847,7 +854,7 @@ async function siteRun(
       ? `Open https://${site.domain} in your browser, make sure you are logged in, then retry.`
       : undefined;
     if (options.progress) {
-      outputResultLine(false, undefined, evalResp.error || "eval failed", hint);
+      await outputResultLine(false, undefined, evalResp.error || "eval failed", hint);
       process.exit(1);
     }
     if (options.json) {
@@ -861,10 +868,10 @@ async function siteRun(
 
   const result = evalResp.data?.result;
   if (result === undefined || result === null) {
-    if (options.progress) {
-      outputResultLine(true, null);
-      return;
-    }
+  if (options.progress) {
+    await outputResultLine(true, null);
+    return;
+  }
     if (options.json) {
       console.log(JSON.stringify({ id: evalReq.id, success: true, data: null }));
     } else {
@@ -895,7 +902,7 @@ async function siteRun(
     const reportHint = `If this is an adapter bug, report via: gh issue create --repo epiral/bb-sites --title "[${name}] <description>" OR: bb-browser site github/issue-create epiral/bb-sites --title "[${name}] <description>"`;
 
     if (options.progress) {
-      outputResultLine(false, undefined, errObj.error, hint);
+      await outputResultLine(false, undefined, errObj.error, hint);
       process.exit(1);
     }
     if (options.json) {
@@ -910,7 +917,7 @@ async function siteRun(
   }
 
   if (options.progress) {
-    outputResultLine(true, parsed);
+    await outputResultLine(true, parsed);
     return;
   }
   if (options.jq) {
