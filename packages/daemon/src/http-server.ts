@@ -178,6 +178,8 @@ export class HttpServer {
       consoleMessages: tab.consoleMessages.size,
       jsErrors: tab.jsErrors.size,
       lastActionSeq: tab.lastActionSeq,
+      lastKnownUrl: tab.lastKnownUrl,
+      navigationEvents: tab.navigationEvents.toArray(),
     }));
 
     this.sendJson(res, 200, {

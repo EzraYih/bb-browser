@@ -454,4 +454,96 @@ describe("TabState", () => {
       assert.equal(items[2].message, "err-9");
     });
   });
+
+  // --------------- Navigation events ---------------
+
+  describe("navigation events", () => {
+    it("addNavigationEvent stores entry with seq", () => {
+      const mgr = makeManager();
+      const tab = makeTab(mgr);
+      tab.addNavigationEvent({
+        type: "frame_navigated",
+        url: "https://www.xiaohongshu.com/explore/abc123",
+        timestamp: Date.now(),
+      });
+      const events = tab.navigationEvents.toArray();
+      assert.equal(events.length, 1);
+      assert.equal(events[0].type, "frame_navigated");
+      assert.equal(events[0].url, "https://www.xiaohongshu.com/explore/abc123");
+      assert.ok(events[0].seq > 0);
+    });
+
+    it("updates lastKnownUrl when url is non-empty", () => {
+      const mgr = makeManager();
+      const tab = makeTab(mgr);
+      assert.equal(tab.lastKnownUrl, "");
+      tab.addNavigationEvent({
+        type: "frame_navigated",
+        url: "https://www.xiaohongshu.com/explore/abc",
+        timestamp: Date.now(),
+      });
+      assert.equal(tab.lastKnownUrl, "https://www.xiaohongshu.com/explore/abc");
+    });
+
+    it("does not update lastKnownUrl when url is empty", () => {
+      const mgr = makeManager();
+      const tab = makeTab(mgr);
+      tab.addNavigationEvent({
+        type: "frame_navigated",
+        url: "https://first.com",
+        timestamp: Date.now(),
+      });
+      tab.addNavigationEvent({
+        type: "target_destroyed",
+        url: "",
+        timestamp: Date.now(),
+      });
+      assert.equal(tab.lastKnownUrl, "https://first.com");
+    });
+
+    it("uses lastKnownUrl for target_destroyed events", () => {
+      const mgr = makeManager();
+      const tab = makeTab(mgr);
+      tab.addNavigationEvent({
+        type: "frame_navigated",
+        url: "https://www.xiaohongshu.com/explore/xyz",
+        timestamp: Date.now(),
+      });
+      tab.addNavigationEvent({
+        type: "target_destroyed",
+        url: tab.lastKnownUrl,
+        timestamp: Date.now(),
+      });
+      const events = tab.navigationEvents.toArray();
+      assert.equal(events.length, 2);
+      assert.equal(events[1].type, "target_destroyed");
+      assert.equal(events[1].url, "https://www.xiaohongshu.com/explore/xyz");
+    });
+
+    it("RingBuffer evicts oldest when capacity exceeded", () => {
+      const mgr = makeManager();
+      const tab = makeTab(mgr);
+      for (let i = 0; i < 55; i++) {
+        tab.addNavigationEvent({
+          type: "frame_navigated",
+          url: `https://example.com/${i}`,
+          timestamp: Date.now(),
+        });
+      }
+      const events = tab.navigationEvents.toArray();
+      assert.equal(events.length, 50);
+      // Oldest 5 should be evicted
+      assert.equal(events[0].url, "https://example.com/5");
+      assert.equal(events[49].url, "https://example.com/54");
+    });
+
+    it("seq is monotonically increasing across events", () => {
+      const mgr = makeManager();
+      const tab = makeTab(mgr);
+      tab.addNavigationEvent({ type: "frame_navigated", url: "https://a.com", timestamp: 1 });
+      tab.addNavigationEvent({ type: "target_destroyed", url: "", timestamp: 2 });
+      const events = tab.navigationEvents.toArray();
+      assert.ok(events[0].seq < events[1].seq);
+    });
+  });
 });

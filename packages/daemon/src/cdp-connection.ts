@@ -10,6 +10,7 @@
 import { request as httpRequest } from "node:http";
 import WebSocket from "ws";
 import { TabStateManager } from "./tab-state.js";
+import { COMMAND_TIMEOUT } from "@bb-browser/shared";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,6 +86,16 @@ export class CdpConnection {
   private sessions = new Map<string, string>();
   /** sessionId -> targetId */
   private attachedTargets = new Map<string, string>();
+
+  /**
+   * Pending session commands per targetId.
+   * Used to reject commands when a target is destroyed.
+   * targetId -> Set<{ reject, method, timer }>
+   */
+  private pendingSessionCommands = new Map<
+    string,
+    Set<{ reject: (e: Error) => void; method: string; timer: ReturnType<typeof setTimeout> }>
+  >();
 
   readonly host: string;
   readonly port: number;
@@ -197,6 +208,15 @@ export class CdpConnection {
     }
     this.pending.clear();
 
+    // Reject all pending session commands
+    for (const [targetId, pendingSet] of this.pendingSessionCommands) {
+      for (const { reject, method, timer } of pendingSet) {
+        clearTimeout(timer);
+        reject(new Error(`${method}: CDP connection closed`));
+      }
+    }
+    this.pendingSessionCommands.clear();
+
     // Reject any waiters
     for (const waiter of this.readyWaiters) {
       waiter.reject(new Error("CDP connection closed before ready"));
@@ -247,6 +267,15 @@ export class CdpConnection {
         if (typeof sessionId === "string") {
           const targetId = this.attachedTargets.get(sessionId);
           if (targetId) {
+            // Record navigation event before cleanup
+            const tab = this.tabManager.getTab(targetId);
+            if (tab) {
+              tab.addNavigationEvent({
+                type: "target_detached",
+                url: tab.lastKnownUrl,
+                timestamp: Date.now(),
+              });
+            }
             this.sessions.delete(targetId);
             this.attachedTargets.delete(sessionId);
             this.tabManager.removeTab(targetId);
@@ -272,6 +301,24 @@ export class CdpConnection {
         const params = message.params as JsonObject;
         const targetId = params.targetId;
         if (typeof targetId === "string") {
+          // Record target destroyed navigation event before cleanup
+          const tab = this.tabManager.getTab(targetId);
+          if (tab) {
+            tab.addNavigationEvent({
+              type: "target_destroyed",
+              url: tab.lastKnownUrl,
+              timestamp: Date.now(),
+            });
+          }
+          // Reject all pending sessionCommands for this target
+          const pending = this.pendingSessionCommands.get(targetId);
+          if (pending) {
+            for (const { reject, method, timer } of pending) {
+              clearTimeout(timer);
+              reject(new Error(`${method}: Target destroyed`));
+            }
+            this.pendingSessionCommands.delete(targetId);
+          }
           const sessionId = this.sessions.get(targetId);
           if (sessionId) {
             this.sessions.delete(targetId);
@@ -303,6 +350,15 @@ export class CdpConnection {
       }
       this.pending.clear();
 
+      // Reject all pending session commands
+      for (const [targetId, pendingSet] of this.pendingSessionCommands) {
+        for (const { reject, method, timer } of pendingSet) {
+          clearTimeout(timer);
+          reject(new Error(`${method}: CDP connection closed`));
+        }
+      }
+      this.pendingSessionCommands.clear();
+
       const closeErr = new Error(this.lastError);
       for (const waiter of this.readyWaiters) {
         waiter.reject(closeErr);
@@ -333,6 +389,20 @@ export class CdpConnection {
           ...(tab.dialogHandler.promptText !== undefined
             ? { promptText: tab.dialogHandler.promptText }
             : {}),
+        });
+      }
+      return;
+    }
+
+    // Navigation events
+    if (method === "Page.frameNavigated") {
+      const frame = params.frame as JsonObject;
+      // Only record main-frame navigations, ignore iframes
+      if (frame?.parentId === undefined) {
+        tab.addNavigationEvent({
+          type: "frame_navigated",
+          url: String(frame?.url ?? ""),
+          timestamp: Date.now(),
         });
       }
       return;
@@ -577,6 +647,7 @@ export class CdpConnection {
     targetId: string,
     method: string,
     params: JsonObject = {},
+    timeoutMs: number = COMMAND_TIMEOUT,
   ): Promise<T> {
     if (!this.socket) throw new Error("CDP not connected");
     const sessionId =
@@ -584,10 +655,38 @@ export class CdpConnection {
     const id = this.nextId++;
     const payload = JSON.stringify({ id, method, params, sessionId });
     return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.socket!.off("message", check);
+        // Remove from pending tracking
+        const pending = this.pendingSessionCommands.get(targetId);
+        if (pending) {
+          pending.delete(entry);
+          if (pending.size === 0) this.pendingSessionCommands.delete(targetId);
+        }
+        reject(new Error(`${method}: sessionCommand timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      const entry = { reject, method, timer };
+
+      // Track for targetDestroyed cleanup
+      let pending = this.pendingSessionCommands.get(targetId);
+      if (!pending) {
+        pending = new Set();
+        this.pendingSessionCommands.set(targetId, pending);
+      }
+      pending.add(entry);
+
       const check = (raw: WebSocket.RawData) => {
         const msg = JSON.parse(raw.toString()) as JsonObject;
         if (msg.id === id && msg.sessionId === sessionId) {
+          clearTimeout(timer);
           this.socket!.off("message", check);
+          // Remove from pending tracking
+          const pendingSet = this.pendingSessionCommands.get(targetId);
+          if (pendingSet) {
+            pendingSet.delete(entry);
+            if (pendingSet.size === 0) this.pendingSessionCommands.delete(targetId);
+          }
           if (msg.error) {
             reject(
               new Error(

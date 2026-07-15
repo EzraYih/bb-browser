@@ -20,6 +20,17 @@ import type {
 import { RingBuffer } from "./ring-buffer.js";
 
 // ---------------------------------------------------------------------------
+// Navigation events
+// ---------------------------------------------------------------------------
+
+export interface NavigationEvent {
+  seq: number;
+  type: "frame_navigated" | "target_destroyed" | "target_detached";
+  url: string;
+  timestamp: number; // Date.now()
+}
+
+// ---------------------------------------------------------------------------
 // Seq-tagged event wrappers
 // ---------------------------------------------------------------------------
 
@@ -34,6 +45,7 @@ export type SeqJSError = JSErrorInfo & { seq: number };
 const NETWORK_CAPACITY = 500;
 const CONSOLE_CAPACITY = 200;
 const ERRORS_CAPACITY = 100;
+const NAV_CAPACITY = 50;
 
 export class TabState {
   readonly targetId: string;
@@ -42,6 +54,10 @@ export class TabState {
   networkRequests = new RingBuffer<SeqNetworkRequest>(NETWORK_CAPACITY);
   consoleMessages = new RingBuffer<SeqConsoleMessage>(CONSOLE_CAPACITY);
   jsErrors = new RingBuffer<SeqJSError>(ERRORS_CAPACITY);
+  navigationEvents = new RingBuffer<NavigationEvent>(NAV_CAPACITY);
+
+  /** Last known URL before a potential navigation interruption. */
+  lastKnownUrl: string = "";
 
   /** Lookup in-flight network requests by requestId for response/failure updates. */
   private networkByRequestId = new Map<string, SeqNetworkRequest>();
@@ -121,6 +137,14 @@ export class TabState {
   addJSError(info: Omit<JSErrorInfo, never>): void {
     const seq = this.nextSeq();
     this.jsErrors.push({ ...info, seq });
+  }
+
+  // --------------- Navigation events ---------------
+
+  addNavigationEvent(info: Omit<NavigationEvent, "seq">): void {
+    const seq = this.nextSeq();
+    this.navigationEvents.push({ ...info, seq });
+    if (info.url) this.lastKnownUrl = info.url;
   }
 
   // --------------- Query helpers ---------------
