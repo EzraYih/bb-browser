@@ -242,6 +242,44 @@ function matchTabOrigin(tabUrl: string, domain: string): boolean {
   }
 }
 
+/**
+ * Tab 健康检查脚本：验证 CDP 上下文是否可用、文档是否就绪。
+ * 如果 tab 被重定向到错误页面或 CDP 上下文已销毁，eval 会抛出异常。
+ */
+export const HEALTH_CHECK_SCRIPT = `(() => {
+  try {
+    return JSON.stringify({
+      ok: true,
+      url: location.href,
+      ready: document.readyState,
+    });
+  } catch (e) {
+    return JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+})()`;
+
+/**
+ * 检查 tab 是否健康（CDP 上下文可用、页面可执行 JS）。
+ * 用于在复用 tab 前排除已退化的 tab（如被重定向到 /website-login/error）。
+ */
+async function isTabHealthy(tabId: number | string): Promise<boolean> {
+  try {
+    const resp: Response = await sendCommand({
+      id: generateId(),
+      action: "eval",
+      script: HEALTH_CHECK_SCRIPT,
+      tabId,
+    });
+    if (!resp.success) return false;
+    const result = resp.data?.result;
+    if (typeof result !== "string") return false;
+    const parsed = JSON.parse(result);
+    return parsed?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 function normalizeTabUrlForMatch(value: string): string | null {
   try {
     const url = new URL(value);
@@ -739,7 +777,16 @@ async function siteRun(
     if (listResp.success && listResp.data?.tabs) {
       const matchingTab = pickPreferredSiteTab(listResp.data.tabs, site.domain, preferredUrl);
       if (matchingTab) {
-        targetTabId = matchingTab.tabId;
+        // ── 健康检查：确认 tab 的 CDP 上下文可用 ──
+        const healthy = await isTabHealthy(matchingTab.tabId);
+        if (healthy) {
+          targetTabId = matchingTab.tabId;
+        } else {
+          // 关闭不健康的 tab，继续走新建分支
+          try {
+            await sendCommand({ id: generateId(), action: "tab_close", tabId: matchingTab.tabId });
+          } catch { /* 静默 */ }
+        }
       }
     }
 

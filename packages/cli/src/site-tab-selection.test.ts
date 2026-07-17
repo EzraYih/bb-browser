@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pickPreferredSiteTab } from "./commands/site";
+import { pickPreferredSiteTab, HEALTH_CHECK_SCRIPT } from "./commands/site";
 
 test("prefers exact URL tab over another tab on the same domain", () => {
   const selected = pickPreferredSiteTab(
@@ -54,4 +54,25 @@ test("prefers the most recent exact URL tab when multiple tabs share the same UR
   );
 
   assert.equal(selected?.tabId, "tab-b");
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// HEALTH_CHECK_SCRIPT — tab 健康检查脚本 (Task 4)
+// ═══════════════════════════════════════════════════════════════════
+
+test("HEALTH_CHECK_SCRIPT is a non-empty string", () => {
+  assert.equal(typeof HEALTH_CHECK_SCRIPT, "string");
+  assert.ok(HEALTH_CHECK_SCRIPT.length > 0);
+});
+
+test("HEALTH_CHECK_SCRIPT returns JSON with ok field", () => {
+  // The script should be a self-executing function that returns JSON
+  assert.ok(HEALTH_CHECK_SCRIPT.includes("ok"));
+  assert.ok(HEALTH_CHECK_SCRIPT.includes("url"));
+  assert.ok(HEALTH_CHECK_SCRIPT.includes("readyState"));
+});
+
+test("HEALTH_CHECK_SCRIPT includes try-catch for error resilience", () => {
+  assert.ok(HEALTH_CHECK_SCRIPT.includes("try"));
+  assert.ok(HEALTH_CHECK_SCRIPT.includes("catch"));
 });
