@@ -806,8 +806,55 @@ async function siteRun(
 
   // ── Progress polling: when --progress is set, poll console messages
   // for __bb_progress lines while the eval is running ──
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
+  //
+  // Uses recursive setTimeout (not setInterval) to prevent overlapping polls.
+  // setInterval(async fn) does NOT wait for fn to complete before firing
+  // the next iteration — if the HTTP request takes >500ms, two polls will
+  // use the same `since` cursor and output duplicate progress lines.
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollStopped = false;
+  let pollingInProgress = false;
   let pollLastSeq = 0;
+
+  async function doPoll(): Promise<void> {
+    if (pollingInProgress) return;
+    pollingInProgress = true;
+    try {
+      const pollReq: Request = {
+        id: generateId(),
+        action: "console",
+        consoleCommand: "get",
+        tabId: targetTabId,
+        since: pollLastSeq,
+        filter: "__bb_progress",
+      };
+      const pollResp: Response = await sendCommand(pollReq);
+      const messages = pollResp.data?.consoleMessages ?? [];
+      for (const msg of messages) {
+        try {
+          const parsed = JSON.parse(msg.text);
+          if (parsed.__bb_progress) {
+            outputProgressLine(parsed.__bb_progress);
+          }
+        } catch {}
+      }
+      pollLastSeq = (pollResp.data?.cursor as number) ?? pollLastSeq;
+    } catch {
+      // Poll failure is non-fatal — retry next interval
+    } finally {
+      pollingInProgress = false;
+    }
+  }
+
+  function schedulePoll(): void {
+    pollTimer = setTimeout(async () => {
+      if (pollStopped) return;
+      await doPoll();
+      if (!pollStopped) {
+        schedulePoll();
+      }
+    }, 500);
+  }
 
   if (options.progress && targetTabId) {
     // Get initial console seq to start polling from
@@ -823,31 +870,7 @@ async function siteRun(
       pollLastSeq = (initResp.data?.cursor as number) ?? 0;
     } catch {}
 
-    pollInterval = setInterval(async () => {
-      try {
-        const pollReq: Request = {
-          id: generateId(),
-          action: "console",
-          consoleCommand: "get",
-          tabId: targetTabId,
-          since: pollLastSeq,
-          filter: "__bb_progress",
-        };
-        const pollResp: Response = await sendCommand(pollReq);
-        const messages = pollResp.data?.consoleMessages ?? [];
-        for (const msg of messages) {
-          try {
-            const parsed = JSON.parse(msg.text);
-            if (parsed.__bb_progress) {
-              outputProgressLine(parsed.__bb_progress);
-            }
-          } catch {}
-        }
-        pollLastSeq = (pollResp.data?.cursor as number) ?? pollLastSeq;
-      } catch {
-        // Poll failure is non-fatal — retry next interval
-      }
-    }, 500);
+    schedulePoll();
   }
 
   let evalResp: Response;
@@ -870,30 +893,18 @@ async function siteRun(
   }
 
   // Stop polling and do a final flush
-  if (pollInterval) {
-    clearInterval(pollInterval);
-    pollInterval = null;
+  if (pollTimer !== null || pollingInProgress) {
+    pollStopped = true;
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    // Wait for any in-flight poll to complete before final flush
+    while (pollingInProgress) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
     // Final poll for any remaining progress messages
-    try {
-      const finalReq: Request = {
-        id: generateId(),
-        action: "console",
-        consoleCommand: "get",
-        tabId: targetTabId,
-        since: pollLastSeq,
-        filter: "__bb_progress",
-      };
-      const finalResp: Response = await sendCommand(finalReq);
-      const messages = finalResp.data?.consoleMessages ?? [];
-      for (const msg of messages) {
-        try {
-          const parsed = JSON.parse(msg.text);
-          if (parsed.__bb_progress) {
-            outputProgressLine(parsed.__bb_progress);
-          }
-        } catch {}
-      }
-    } catch {}
+    await doPoll();
   }
 
   if (!evalResp.success) {
