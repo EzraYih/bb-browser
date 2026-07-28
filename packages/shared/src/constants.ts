@@ -11,8 +11,8 @@ export const DAEMON_HOST = "127.0.0.1";
 /** SSE heartbeat interval in milliseconds. */
 export const SSE_HEARTBEAT_INTERVAL = 15000;
 
-/** Command execution timeout in milliseconds (180s — must exceed adapter timeBudget). */
-export const COMMAND_TIMEOUT = 180000;
+/** Command execution timeout in milliseconds (500s — must exceed adapter timeBudget). */
+export const COMMAND_TIMEOUT = 500000;
 
 /** SSE reconnect delay in milliseconds. */
 export const SSE_RECONNECT_DELAY = 3000;
