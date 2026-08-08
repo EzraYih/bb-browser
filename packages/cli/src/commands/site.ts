@@ -637,7 +637,7 @@ async function siteRun(
         : null;
       if (matchedArg) {
         // 布尔标志：无值或下一个参数是另一标志
-        if (!args[i + 1] || args[i + 1].startsWith("--")) {
+        if (args[i + 1] === undefined || args[i + 1].startsWith("--")) {
           argMap[matchedArg] = "true";
         } else {
           argMap[matchedArg] = args[i + 1];
