@@ -270,11 +270,11 @@ export class CdpConnection {
     this.socket = null;
     this._connected = false;
 
-for (const p of this.pending.values()) {
-  if (p.timer) clearTimeout(p.timer);
-  p.reject(new Error("CDP connection closed"));
-}
-this.pending.clear();
+    for (const p of this.pending.values()) {
+      if (p.timer) clearTimeout(p.timer);
+      p.reject(new Error("CDP connection closed"));
+    }
+    this.pending.clear();
 
     // Reject all pending session commands
     for (const [, pendingSet] of this.pendingSessionCommands) {
@@ -435,11 +435,11 @@ this.pending.clear();
       this._connected = false;
       this.socket = null;
       this.lastError = "CDP WebSocket closed unexpectedly";
-for (const p of this.pending.values()) {
-  if (p.timer) clearTimeout(p.timer);
-  p.reject(new Error("CDP connection closed"));
-}
-this.pending.clear();
+      for (const p of this.pending.values()) {
+        if (p.timer) clearTimeout(p.timer);
+        p.reject(new Error("CDP connection closed"));
+      }
+      this.pending.clear();
 
       // Reject all pending session commands (listeners are on the closed socket,
       // so they'll be GC'd — no need to explicitly remove)
