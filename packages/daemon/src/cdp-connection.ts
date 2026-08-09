@@ -32,6 +32,9 @@ interface PendingSessionEntry {
   check?: (raw: WebSocket.RawData) => void;
 }
 
+// Default delay before attempting reconnection after an unexpected WebSocket close.
+const RECONNECT_DELAY = 2000;
+
 interface PendingCommand {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
@@ -131,10 +134,18 @@ export class CdpConnection {
   /** Resolvers for commands queued before CDP is ready. */
   private readyWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
 
-  constructor(host: string, port: number, tabManager: TabStateManager) {
+  /** Timer for scheduling reconnection after unexpected WebSocket close. */
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Whether auto-reconnect is enabled (disabled by explicit disconnect). */
+  private shouldReconnect = true;
+  /** Delay before reconnection attempt (ms). */
+  private readonly reconnectDelayMs: number;
+
+  constructor(host: string, port: number, tabManager: TabStateManager, reconnectDelayMs: number = RECONNECT_DELAY) {
     this.host = host;
     this.port = port;
     this.tabManager = tabManager;
+    this.reconnectDelayMs = reconnectDelayMs;
   }
 
   get connected(): boolean {
@@ -211,8 +222,38 @@ export class CdpConnection {
     });
   }
 
+  /** Attempt to reconnect after an unexpected WebSocket close. */
+  private async reconnect(): Promise<void> {
+    if (!this.shouldReconnect) return;
+    // Clear stale session state — all sessionIds are invalid after WS close
+    this.sessions.clear();
+    this.attachedTargets.clear();
+    try {
+      this.connectionPromise = this.doConnect();
+      await this.connectionPromise;
+      this.lastError = null;
+      this.connectionPromise = null;
+    } catch (err) {
+      this.connectionPromise = null;
+      this.lastError = err instanceof Error ? err.message : String(err);
+      // Schedule another reconnect attempt
+      if (this.shouldReconnect) {
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
+          this.reconnect().catch(() => {});
+        }, this.reconnectDelayMs);
+      }
+    }
+  }
+
   /** Gracefully close the CDP connection. */
   disconnect(): void {
+    // Disable auto-reconnect before closing — this is an intentional shutdown
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.socket) {
       // Remove all pending sessionCommand check listeners before closing
       for (const [, pendingSet] of this.pendingSessionCommands) {
@@ -415,6 +456,14 @@ this.pending.clear();
         waiter.reject(closeErr);
       }
       this.readyWaiters = [];
+
+      // Schedule reconnection after unexpected WebSocket close
+      if (this.shouldReconnect) {
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
+          this.reconnect().catch(() => {});
+        }, this.reconnectDelayMs);
+      }
     });
 
     ws.on("error", () => {});

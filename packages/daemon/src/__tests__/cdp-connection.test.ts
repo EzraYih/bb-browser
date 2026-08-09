@@ -50,7 +50,7 @@ function createMockWebSocket(): EventEmitter & {
  */
 function createMockCdpConnection(): { cdp: CdpConnection; ws: ReturnType<typeof createMockWebSocket>; tabManager: TabStateManager } {
   const tabManager = new TabStateManager();
-  const cdp = new CdpConnection("127.0.0.1", 9222, tabManager);
+  const cdp = new CdpConnection("127.0.0.1", 9222, tabManager, 60000);
 
   const ws = createMockWebSocket();
 
@@ -355,5 +355,52 @@ describe("CdpConnection browserCommand timeout", () => {
 
     const result = await promise;
     assert.deepEqual(result, { targetInfos: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-reconnect on unexpected WebSocket close (defect #3)
+// ---------------------------------------------------------------------------
+
+describe("CdpConnection auto-reconnect", () => {
+  it("schedules reconnect timer after unexpected WebSocket close", () => {
+    const { cdp, ws } = createMockCdpConnection();
+
+    // Simulate unexpected close
+    ws.close();
+
+    const internal = cdp as unknown as { reconnectTimer: ReturnType<typeof setTimeout> | null };
+    assert.ok(internal.reconnectTimer !== null, "Reconnect timer should be scheduled after unexpected close");
+
+    // Cleanup
+    cdp.disconnect();
+  });
+
+  it("does not schedule reconnect on explicit disconnect", () => {
+    const { cdp } = createMockCdpConnection();
+
+    cdp.disconnect();
+
+    const internal = cdp as unknown as {
+      reconnectTimer: ReturnType<typeof setTimeout> | null;
+      shouldReconnect: boolean;
+    };
+    assert.equal(internal.shouldReconnect, false, "shouldReconnect should be false after disconnect");
+    assert.equal(internal.reconnectTimer, null, "No reconnect timer should be scheduled after explicit disconnect");
+  });
+
+  it("clears pending reconnect timer on disconnect", () => {
+    const { cdp, ws } = createMockCdpConnection();
+
+    // Trigger unexpected close to schedule a reconnect timer
+    ws.close();
+
+    const internal = cdp as unknown as { reconnectTimer: ReturnType<typeof setTimeout> | null };
+    assert.ok(internal.reconnectTimer !== null, "Reconnect timer should be scheduled");
+
+    // Now explicitly disconnect — should clear the timer
+    cdp.disconnect();
+
+    assert.equal(internal.reconnectTimer, null, "Reconnect timer should be cleared after disconnect");
   });
 });
