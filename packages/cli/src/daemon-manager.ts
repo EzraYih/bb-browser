@@ -4,7 +4,7 @@
 
 import { spawn } from "node:child_process";
 import { unlink } from "node:fs/promises";
-import { openSync } from "node:fs";
+import { openSync, closeSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import { existsSync } from "node:fs";
@@ -128,6 +128,12 @@ export async function ensureDaemon(): Promise<void> {
     stdio: ["ignore", "ignore", logFd ?? "ignore"],
   });
   child.unref();
+
+  // Close the log fd in the parent — the child process has already inherited it
+  // via stdio. Keeping it open in the parent leaks a file descriptor on every spawn.
+  if (logFd !== undefined) {
+    try { closeSync(logFd); } catch { /* fd already closed or invalid */ }
+  }
 
   // Wait for daemon to become healthy (up to 10 seconds — includes Chrome launch time)
   const deadline = Date.now() + 10000;
