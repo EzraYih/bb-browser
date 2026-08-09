@@ -4,9 +4,11 @@
 
 import { spawn } from "node:child_process";
 import { unlink } from "node:fs/promises";
+import { openSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import type { Request, Response } from "@bb-browser/shared";
 import {
   COMMAND_TIMEOUT,
@@ -109,10 +111,21 @@ export async function ensureDaemon(): Promise<void> {
   }
 
   // Spawn daemon process with discovered CDP endpoint
+  // stderr is redirected to ~/.bb-browser/daemon.log for diagnostics.
+  // Previously stdio was "ignore", which meant daemon crashes were invisible.
   const daemonPath = getDaemonPath();
+  const daemonDir = process.env.BB_BROWSER_HOME || join(homedir(), ".bb-browser");
+  const daemonLogPath = join(daemonDir, "daemon.log");
+  let logFd: number | undefined;
+  try {
+    // Open in append mode so logs accumulate across daemon restarts
+    logFd = openSync(daemonLogPath, "a");
+  } catch {
+    // If we can't open the log file, fall back to ignoring stderr
+  }
   const child = spawn(process.execPath, [daemonPath, "--cdp-host", cdpInfo.host, "--cdp-port", String(cdpInfo.port)], {
     detached: true,
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", logFd ?? "ignore"],
   });
   child.unref();
 

@@ -18,6 +18,20 @@ import { COMMAND_TIMEOUT } from "@bb-browser/shared";
 
 type JsonObject = Record<string, unknown>;
 
+/**
+ * Pending session command entry — tracks check listener for cleanup.
+ *
+ * `check` 是添加到 WebSocket 上的 message 监听器，用于匹配响应。
+ * 当 target 被销毁或 detach 时，必须从 WebSocket 移除 check 监听器，
+ * 否则监听器会永久泄漏（每条 WS 消息都会被 parse 一次）。
+ */
+interface PendingSessionEntry {
+  reject: (e: Error) => void;
+  method: string;
+  timer: ReturnType<typeof setTimeout>;
+  check?: (raw: WebSocket.RawData) => void;
+}
+
 interface PendingCommand {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
@@ -89,12 +103,15 @@ export class CdpConnection {
 
   /**
    * Pending session commands per targetId.
-   * Used to reject commands when a target is destroyed.
-   * targetId -> Set<{ reject, method, timer }>
+   * Used to reject commands when a target is destroyed or detached.
+   * targetId -> Set<PendingSessionEntry>
+   *
+   * PendingSessionEntry 包含 check 函数引用，以便在 target 销毁/detach 时
+   * 从 WebSocket 上移除对应的 message 监听器，防止监听器泄漏。
    */
   private pendingSessionCommands = new Map<
     string,
-    Set<{ reject: (e: Error) => void; method: string; timer: ReturnType<typeof setTimeout> }>
+    Set<PendingSessionEntry>
   >();
 
   readonly host: string;
@@ -196,6 +213,14 @@ export class CdpConnection {
   /** Gracefully close the CDP connection. */
   disconnect(): void {
     if (this.socket) {
+      // Remove all pending sessionCommand check listeners before closing
+      for (const [, pendingSet] of this.pendingSessionCommands) {
+        for (const { check } of pendingSet) {
+          if (check) {
+            this.socket.off("message", check);
+          }
+        }
+      }
       try {
         this.socket.close();
       } catch {}
@@ -276,6 +301,18 @@ export class CdpConnection {
                 timestamp: Date.now(),
               });
             }
+            // Reject all pending sessionCommands for this target and remove listeners
+            const pending = this.pendingSessionCommands.get(targetId);
+            if (pending) {
+              for (const { reject, method, timer, check } of pending) {
+                clearTimeout(timer);
+                if (check && this.socket) {
+                  this.socket.off("message", check);
+                }
+                reject(new Error(`${method}: Target detached`));
+              }
+              this.pendingSessionCommands.delete(targetId);
+            }
             this.sessions.delete(targetId);
             this.attachedTargets.delete(sessionId);
             this.tabManager.removeTab(targetId);
@@ -310,11 +347,14 @@ export class CdpConnection {
               timestamp: Date.now(),
             });
           }
-          // Reject all pending sessionCommands for this target
+          // Reject all pending sessionCommands for this target and remove listeners
           const pending = this.pendingSessionCommands.get(targetId);
           if (pending) {
-            for (const { reject, method, timer } of pending) {
+            for (const { reject, method, timer, check } of pending) {
               clearTimeout(timer);
+              if (check && this.socket) {
+                this.socket.off("message", check);
+              }
               reject(new Error(`${method}: Target destroyed`));
             }
             this.pendingSessionCommands.delete(targetId);
@@ -350,7 +390,8 @@ export class CdpConnection {
       }
       this.pending.clear();
 
-      // Reject all pending session commands
+      // Reject all pending session commands (listeners are on the closed socket,
+      // so they'll be GC'd — no need to explicitly remove)
       for (const [, pendingSet] of this.pendingSessionCommands) {
         for (const { reject, method, timer } of pendingSet) {
           clearTimeout(timer);
@@ -666,7 +707,7 @@ export class CdpConnection {
         reject(new Error(`${method}: sessionCommand timeout after ${timeoutMs}ms`));
       }, timeoutMs);
 
-      const entry = { reject, method, timer };
+      const entry: PendingSessionEntry = { reject, method, timer };
 
       // Track for targetDestroyed cleanup
       let pending = this.pendingSessionCommands.get(targetId);
@@ -698,6 +739,7 @@ export class CdpConnection {
           }
         }
       };
+      entry.check = check;  // Store check ref for cleanup on target destroy/detach
       this.socket!.on("message", check);
       this.socket!.send(payload);
     });

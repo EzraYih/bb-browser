@@ -130,11 +130,27 @@ function writeDaemonJson(info: DaemonInfo): void {
   } catch {}
 }
 
+/**
+ * 清理 daemon.json — PID 感知版本。
+ *
+ * 只删除由当前进程写入的 daemon.json。
+ * 如果 daemon.json 中的 PID 不匹配（例如端口被占用导致 httpServer.start()
+ * 失败，但另一个 daemon 进程已经成功写入 daemon.json），则不删除。
+ *
+ * 这修复了并发 daemon 启动竞态：两个 CLI 进程同时 ensureDaemon()
+ * 各自 spawn 一个 daemon 进程，失败方（EADDRINUSE）退出时不应该
+ * 删除成功方写入的 daemon.json。
+ */
 function cleanupDaemonJson(): void {
-  if (existsSync(DAEMON_JSON)) {
-    try {
+  try {
+    const raw = readFileSync(DAEMON_JSON, "utf8");
+    const info = JSON.parse(raw) as { pid?: number };
+    if (info.pid === process.pid) {
       unlinkSync(DAEMON_JSON);
-    } catch {}
+    }
+    // PID 不匹配 — daemon.json 由另一个进程写入，不删除
+  } catch {
+    // 文件不存在或解析失败 — 不做任何操作
   }
 }
 
@@ -265,6 +281,21 @@ async function main(): Promise<void> {
     console.error("[Daemon] HTTP server is running, but commands will fail until CDP connects.");
   }
 }
+
+// ── 全局异常捕获 — 记录到 daemon.log（stderr）后退出 ──
+// uncaughtException：事件回调中的同步异常（如 JSON.parse 失败）
+// 这些异常会导致进程崩溃，必须记录以便后续调查
+process.on("uncaughtException", (error) => {
+  console.error("[Daemon] Uncaught exception:", error);
+  try { cleanupDaemonJson(); } catch {}
+  process.exit(1);
+});
+
+// unhandledRejection：未捕获的 Promise rejection
+// 记录但不退出 — daemon 可能仍能继续工作
+process.on("unhandledRejection", (reason) => {
+  console.error("[Daemon] Unhandled rejection:", reason);
+});
 
 main().catch((error) => {
   console.error("[Daemon] Fatal error:", error);
