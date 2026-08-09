@@ -36,6 +36,7 @@ interface PendingCommand {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
   method: string;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 export interface CdpTargetInfo {
@@ -228,10 +229,11 @@ export class CdpConnection {
     this.socket = null;
     this._connected = false;
 
-    for (const p of this.pending.values()) {
-      p.reject(new Error("CDP connection closed"));
-    }
-    this.pending.clear();
+for (const p of this.pending.values()) {
+  if (p.timer) clearTimeout(p.timer);
+  p.reject(new Error("CDP connection closed"));
+}
+this.pending.clear();
 
     // Reject all pending session commands
     for (const [, pendingSet] of this.pendingSessionCommands) {
@@ -268,6 +270,7 @@ export class CdpConnection {
         const p = this.pending.get(message.id);
         if (!p) return;
         this.pending.delete(message.id);
+        if (p.timer) clearTimeout(p.timer);
         if (message.error) {
           p.reject(
             new Error(
@@ -391,10 +394,11 @@ export class CdpConnection {
       this._connected = false;
       this.socket = null;
       this.lastError = "CDP WebSocket closed unexpectedly";
-      for (const p of this.pending.values()) {
-        p.reject(new Error("CDP connection closed"));
-      }
-      this.pending.clear();
+for (const p of this.pending.values()) {
+  if (p.timer) clearTimeout(p.timer);
+  p.reject(new Error("CDP connection closed"));
+}
+this.pending.clear();
 
       // Reject all pending session commands (listeners are on the closed socket,
       // so they'll be GC'd — no need to explicitly remove)
@@ -675,15 +679,26 @@ export class CdpConnection {
   // ---------------------------------------------------------------------------
 
   /** Send a browser-level CDP command. */
-  async browserCommand<T = unknown>(method: string, params: JsonObject = {}): Promise<T> {
+  async browserCommand<T = unknown>(
+    method: string,
+    params: JsonObject = {},
+    timeoutMs: number = COMMAND_TIMEOUT,
+  ): Promise<T> {
     if (!this.socket) throw new Error("CDP not connected");
     const id = this.nextId++;
     const payload = JSON.stringify({ id, method, params });
     return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(new Error(`browserCommand timeout: ${method} after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
       this.pending.set(id, {
         resolve: resolve as (v: unknown) => void,
         reject,
         method,
+        timer,
       });
       this.socket!.send(payload);
     });

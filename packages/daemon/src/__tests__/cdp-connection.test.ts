@@ -306,3 +306,54 @@ describe("CdpConnection malformed message handling", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// browserCommand timeout (defect #1)
+// ---------------------------------------------------------------------------
+
+describe("CdpConnection browserCommand timeout", () => {
+  it("rejects after timeoutMs when no response arrives", async () => {
+    const { cdp } = createMockCdpConnection();
+
+    const shortTimeout = 100;
+    const promise = cdp.browserCommand("Target.getTargets", {}, shortTimeout);
+
+    await assert.rejects(
+      promise,
+      (err: Error) => {
+        assert.ok(err.message.includes("browserCommand timeout"));
+        assert.ok(err.message.includes("100ms"));
+        return true;
+      },
+      "Should reject with browserCommand timeout error",
+    );
+  });
+
+  it("cleans up pending Map entry after timeout", async () => {
+    const { cdp } = createMockCdpConnection();
+
+    const promise = cdp.browserCommand("Target.getTargets", {}, 50);
+    await assert.rejects(promise);
+
+    const pending = (cdp as unknown as { pending: Map<number, unknown> }).pending;
+    assert.equal(pending.size, 0, "Pending Map should be empty after timeout");
+  });
+
+  it("resolves normally when response arrives before timeout", async () => {
+    const { cdp, ws } = createMockCdpConnection();
+
+    const promise = cdp.browserCommand<{ targetInfos: [] }>("Target.getTargets", {}, 5000);
+
+    // Allow the command to be sent
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Emit response with id=1 (first browserCommand)
+    ws.emit("message", Buffer.from(JSON.stringify({
+      id: 1,
+      result: { targetInfos: [] },
+    })));
+
+    const result = await promise;
+    assert.deepEqual(result, { targetInfos: [] });
+  });
+});
