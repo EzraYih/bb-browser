@@ -209,7 +209,7 @@ export class CdpConnection {
     this.pending.clear();
 
     // Reject all pending session commands
-    for (const [targetId, pendingSet] of this.pendingSessionCommands) {
+    for (const [, pendingSet] of this.pendingSessionCommands) {
       for (const { reject, method, timer } of pendingSet) {
         clearTimeout(timer);
         reject(new Error(`${method}: CDP connection closed`));
@@ -351,7 +351,7 @@ export class CdpConnection {
       this.pending.clear();
 
       // Reject all pending session commands
-      for (const [targetId, pendingSet] of this.pendingSessionCommands) {
+      for (const [, pendingSet] of this.pendingSessionCommands) {
         for (const { reject, method, timer } of pendingSet) {
           clearTimeout(timer);
           reject(new Error(`${method}: CDP connection closed`));

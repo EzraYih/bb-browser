@@ -9,7 +9,7 @@
  * Uses mock WebSocket (EventEmitter) — no real Chrome or WebSocket needed.
  */
 
-import { describe, it, beforeEach } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { CdpConnection } from "../cdp-connection.js";
@@ -173,7 +173,7 @@ describe("CdpConnection sessionCommand", () => {
     });
 
     it("records target_destroyed navigation event before cleanup", async () => {
-      const { cdp, ws, tabManager } = createMockCdpConnection();
+      const { ws, tabManager } = createMockCdpConnection();
       const targetId = "TARGET_TEST_1234";
 
       // Add a navigation event first so lastKnownUrl is set
@@ -199,7 +199,7 @@ describe("CdpConnection sessionCommand", () => {
     });
 
     it("removes the tab from tabManager after targetDestroyed", async () => {
-      const { cdp, ws, tabManager } = createMockCdpConnection();
+      const { ws, tabManager } = createMockCdpConnection();
       const targetId = "TARGET_TEST_1234";
 
       assert.ok(tabManager.getTab(targetId), "Tab should exist before destroy");
@@ -257,18 +257,9 @@ describe("CdpConnection sessionCommand", () => {
       // Allow the command to be sent and listener registered
       await new Promise((r) => setTimeout(r, 10));
 
-      // Simulate a CDP response
-      const sentPayload = JSON.parse((ws as unknown as { send: (d: string) => void }).send
-        ? (() => {
-          // The mock send doesn't store data, so we construct the expected response
-          return JSON.stringify({ id: 1 }); // first command ID
-        })()
-        : "{}");
-
       // We need the actual ID used. Let's intercept send.
-      let sentData = "";
       const origSend = ws.send;
-      ws.send = (data: string) => { sentData = data; };
+      ws.send = (_data: string) => {};
 
       // Actually, we already sent the command. The nextId was already incremented.
       // Let's just emit a response with the expected structure.

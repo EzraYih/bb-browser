@@ -15,7 +15,7 @@ import { screenshotCommand } from "./commands/screenshot.js";
 import { waitCommand } from "./commands/wait.js";
 import { pressCommand } from "./commands/press.js";
 import { scrollCommand } from "./commands/scroll.js";
-import { backCommand, forwardCommand, refreshCommand, reloadCommand } from "./commands/nav.js";
+import { backCommand, forwardCommand, refreshCommand } from "./commands/nav.js";
 import { checkCommand, uncheckCommand } from "./commands/check.js";
 import { selectCommand } from "./commands/select.js";
 import { evalCommand } from "./commands/eval.js";
@@ -33,7 +33,7 @@ import { shutdownCommand, startCommand, statusCommand } from "./commands/daemon.
 import { getDaemonPath } from "./daemon-manager.js";
 import { setJqExpression } from "./client.js";
 
-import { parseArgs, type ParsedArgs } from "./parse-args.js";
+import { parseArgs } from "./parse-args.js";
 
 declare const __BB_BROWSER_VERSION__: string;
 

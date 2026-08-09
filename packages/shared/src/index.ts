@@ -32,8 +32,6 @@ export {
 export {
   type CommandDef,
   COMMANDS,
-  findCommand,
-  getCommandsByCategory,
 } from "./commands.js";
 
 export {

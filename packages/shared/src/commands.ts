@@ -432,16 +432,3 @@ export const COMMANDS: CommandDef[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Find a command definition by its action name. */
-export function findCommand(action: string): CommandDef | undefined {
-  return COMMANDS.find((c) => c.action === action);
-}
-
-/** Get all commands in a given category. */
-export function getCommandsByCategory(category: CommandDef["category"]): CommandDef[] {
-  return COMMANDS.filter((c) => c.category === category);
-}
