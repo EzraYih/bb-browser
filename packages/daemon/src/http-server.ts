@@ -128,12 +128,18 @@ export class HttpServer {
 
       // Wait for CDP to be ready (two-phase startup)
       if (!this.cdp.connected) {
+        let rejectCdpTimeout!: (err: Error) => void;
+        const cdpTimeoutPromise = new Promise<never>((_, reject) => {
+          rejectCdpTimeout = reject;
+        });
+        const cdpTimer = setTimeout(
+          () => rejectCdpTimeout(new Error("CDP connection timeout")),
+          COMMAND_TIMEOUT,
+        );
         try {
           await Promise.race([
             this.cdp.waitUntilReady(),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error("CDP connection timeout")), COMMAND_TIMEOUT),
-            ),
+            cdpTimeoutPromise,
           ]);
         } catch {
           const cdpTarget = `${this.cdp.host}:${this.cdp.port}`;
@@ -146,18 +152,34 @@ export class HttpServer {
             hint: "Make sure Chrome is running. Try: bb-browser daemon shutdown && bb-browser tab list",
           });
           return;
+        } finally {
+          clearTimeout(cdpTimer);
         }
       }
 
       // Dispatch with timeout
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Command timeout")), COMMAND_TIMEOUT),
+      let rejectCmdTimeout!: (err: Error) => void;
+      const cmdTimeoutPromise = new Promise<never>((_, reject) => {
+        rejectCmdTimeout = reject;
+      });
+      const cmdTimer = setTimeout(
+        () => rejectCmdTimeout(new Error("Command timeout")),
+        COMMAND_TIMEOUT,
       );
-      const response = await Promise.race([
-        dispatchRequest(this.cdp, request),
-        timeout,
-      ]);
-      this.sendJson(res, 200, response);
+      try {
+        const response = await Promise.race([
+          dispatchRequest(this.cdp, request),
+          cmdTimeoutPromise,
+        ]);
+        this.sendJson(res, 200, response);
+      } catch (error) {
+        this.sendJson(res, 400, {
+          success: false,
+          error: error instanceof Error ? error.message : "Invalid request",
+        });
+      } finally {
+        clearTimeout(cmdTimer);
+      }
     } catch (error) {
       this.sendJson(res, 400, {
         success: false,
