@@ -30,6 +30,20 @@ export class RingBuffer<T> {
     }
   }
 
+  /** Push a new element, evicting the oldest if at capacity. Returns the evicted element or undefined. */
+  pushAndGetEvicted(item: T): T | undefined {
+    let evicted: T | undefined;
+    if (this.count >= this.capacity) {
+      evicted = this.items[this.head] as T | undefined;
+    }
+    this.items[this.head] = item;
+    this.head = (this.head + 1) % this.capacity;
+    if (this.count < this.capacity) {
+      this.count++;
+    }
+    return evicted;
+  }
+
   /** Return all stored elements in insertion order (oldest first). */
   toArray(): T[] {
     if (this.count === 0) return [];

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { TabState, TabStateManager } from "../tab-state.js";
+import { RingBuffer } from "../ring-buffer.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -334,6 +335,22 @@ describe("TabState", () => {
       assert.equal(items[0].url, "https://example.com/10");
       assert.equal(items[499].url, "https://example.com/509");
     });
+
+    it("removes evicted entry from networkByRequestId", () => {
+      const mgr = makeManager();
+      const tab = makeTab(mgr);
+      // Fill to capacity (500)
+      for (let i = 0; i < 500; i++) {
+        addNetworkRequest(tab, { requestId: `r${i}` });
+      }
+      // Add one more — should evict r0
+      addNetworkRequest(tab, { requestId: "r500" });
+
+      const internal = tab as unknown as { networkByRequestId: Map<string, unknown> };
+      assert.ok(!internal.networkByRequestId.has("r0"), "r0 should be removed from networkByRequestId after eviction");
+      assert.ok(internal.networkByRequestId.has("r500"), "r500 should be in networkByRequestId");
+      assert.equal(internal.networkByRequestId.size, 500, "networkByRequestId should have exactly 500 entries");
+    });
   });
 
   // --------------- getConsoleMessages query options ---------------
@@ -535,6 +552,23 @@ describe("TabState", () => {
       // Oldest 5 should be evicted
       assert.equal(events[0].url, "https://example.com/5");
       assert.equal(events[49].url, "https://example.com/54");
+    });
+
+    it("RingBuffer.pushAndGetEvicted returns undefined when not at capacity", () => {
+      const buf = new RingBuffer<number>(3);
+      assert.equal(buf.pushAndGetEvicted(1), undefined);
+      assert.equal(buf.pushAndGetEvicted(2), undefined);
+      assert.equal(buf.pushAndGetEvicted(3), undefined);
+    });
+
+    it("RingBuffer.pushAndGetEvicted returns evicted element when at capacity", () => {
+      const buf = new RingBuffer<number>(3);
+      buf.pushAndGetEvicted(1);
+      buf.pushAndGetEvicted(2);
+      buf.pushAndGetEvicted(3);
+      assert.equal(buf.pushAndGetEvicted(4), 1);
+      assert.equal(buf.pushAndGetEvicted(5), 2);
+      assert.equal(buf.pushAndGetEvicted(6), 3);
     });
 
     it("seq is monotonically increasing across events", () => {

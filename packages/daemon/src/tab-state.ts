@@ -97,7 +97,10 @@ export class TabState {
   addNetworkRequest(requestId: string, info: Omit<NetworkRequestInfo, "requestId">): void {
     const seq = this.nextSeq();
     const entry: SeqNetworkRequest = { ...info, requestId, seq };
-    this.networkRequests.push(entry);
+    const evicted = this.networkRequests.pushAndGetEvicted(entry);
+    if (evicted) {
+      this.networkByRequestId.delete((evicted as SeqNetworkRequest).requestId);
+    }
     this.networkByRequestId.set(requestId, entry);
   }
 
