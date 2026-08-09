@@ -17,6 +17,9 @@ import { COMMAND_TIMEOUT, DAEMON_PORT } from "@bb-browser/shared";
 import { CdpConnection } from "./cdp-connection.js";
 import { dispatchRequest } from "./command-dispatch.js";
 
+/** Maximum request body size (10 MB) — prevents OOM from oversized payloads. */
+const MAX_BODY_SIZE = 10 * 1024 * 1024;
+
 export interface HttpServerOptions {
   host?: string;
   port?: number;
@@ -235,7 +238,16 @@ export class HttpServer {
   private readBody(req: IncomingMessage): Promise<string> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
-      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      let totalSize = 0;
+      req.on("data", (chunk: Buffer) => {
+        totalSize += chunk.length;
+        if (totalSize > MAX_BODY_SIZE) {
+          req.destroy();
+          reject(new Error(`Request body exceeds ${MAX_BODY_SIZE} bytes`));
+          return;
+        }
+        chunks.push(chunk);
+      });
       req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
       req.on("error", reject);
     });
