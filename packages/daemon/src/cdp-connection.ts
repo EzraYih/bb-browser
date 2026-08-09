@@ -255,7 +255,13 @@ export class CdpConnection {
 
   private setupListeners(ws: WebSocket): void {
     ws.on("message", (raw) => {
-      const message = JSON.parse(raw.toString()) as JsonObject;
+      let message: JsonObject;
+      try {
+        message = JSON.parse(raw.toString()) as JsonObject;
+      } catch {
+        // Ignore malformed WebSocket messages (protocol glitches, buffer truncation)
+        return;
+      }
 
       // Response to a browser-level command
       if (typeof message.id === "number") {

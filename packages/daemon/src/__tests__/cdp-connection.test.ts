@@ -278,3 +278,31 @@ describe("CdpConnection sessionCommand", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Malformed WebSocket message handling (defect #2)
+// ---------------------------------------------------------------------------
+
+describe("CdpConnection malformed message handling", () => {
+  it("ignores non-JSON message without throwing", async () => {
+    const { cdp, ws } = createMockCdpConnection();
+
+    // Simulate Chrome sending a non-JSON message (protocol glitch)
+    assert.doesNotThrow(() => {
+      ws.emit("message", Buffer.from("not valid json {{{"));
+    });
+
+    // Normal commands should still work after the malformed message
+    const result = cdp.browserCommand("Target.getTargets");
+    ws.emit("message", Buffer.from(JSON.stringify({ id: 1, result: { targetInfos: [] } })));
+    assert.deepEqual(await result, { targetInfos: [] });
+  });
+
+  it("ignores empty message", async () => {
+    const { ws } = createMockCdpConnection();
+
+    assert.doesNotThrow(() => {
+      ws.emit("message", Buffer.from(""));
+    });
+  });
+});
