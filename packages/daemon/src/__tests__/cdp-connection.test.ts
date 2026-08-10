@@ -100,19 +100,20 @@ describe("CdpConnection sessionCommand", () => {
       );
     });
 
-    it("removes the message listener after timeout", async () => {
+    it("does not add per-command message listeners", async () => {
       const { cdp, ws } = createMockCdpConnection();
-
       const listenerCountBefore = ws.listenerCount("message");
 
       const promise = cdp.sessionCommand("TARGET_TEST_1234", "Runtime.evaluate", {}, 50);
+      // Prevent unhandled rejection if assertion fails before await
+      promise.catch(() => {});
 
-      // Listener should be added
-      assert.ok(ws.listenerCount("message") > listenerCountBefore);
+      // Listener count should NOT increase — main handler routes all responses
+      assert.equal(ws.listenerCount("message"), listenerCountBefore);
 
       await assert.rejects(promise);
 
-      // Listener should be removed after timeout
+      // Still no extra listeners
       assert.equal(ws.listenerCount("message"), listenerCountBefore);
     });
 
@@ -123,7 +124,7 @@ describe("CdpConnection sessionCommand", () => {
 
       // While pending, the command should be tracked
       const pendingBefore = (cdp as unknown as {
-        pendingSessionCommands: Map<string, Set<unknown>>;
+        pendingSessionCommands: Map<string, Set<number>>;
       }).pendingSessionCommands.get("TARGET_TEST_1234");
       assert.ok(pendingBefore && pendingBefore.size > 0, "Should have pending command tracked");
 
@@ -131,9 +132,112 @@ describe("CdpConnection sessionCommand", () => {
 
       // After timeout, should be cleaned up
       const pendingAfter = (cdp as unknown as {
-        pendingSessionCommands: Map<string, Set<unknown>>;
+        pendingSessionCommands: Map<string, Set<number>>;
       }).pendingSessionCommands.get("TARGET_TEST_1234");
       assert.ok(!pendingAfter || pendingAfter.size === 0, "Pending commands should be cleaned up after timeout");
+    });
+  });
+
+  describe("sessionCommand listener efficiency", () => {
+    it("does not add per-command listeners for 20 concurrent commands", async () => {
+      const { cdp, ws } = createMockCdpConnection();
+      const listenerCountBefore = ws.listenerCount("message");
+
+      // Start 20 concurrent sessionCommands
+      const promises: Promise<unknown>[] = [];
+      for (let i = 0; i < 20; i++) {
+        promises.push(
+          cdp.sessionCommand("TARGET_TEST_1234", "Runtime.evaluate", {}, 10000).catch(() => {}),
+        );
+      }
+
+      // Allow all commands to register
+      await new Promise((r) => setTimeout(r, 20));
+
+      // CRITICAL: listener count should NOT increase
+      assert.equal(
+        ws.listenerCount("message"),
+        listenerCountBefore,
+        "Should not add per-command listeners — main handler routes all responses",
+      );
+
+      // Cleanup: reject all pending
+      cdp.disconnect();
+      await Promise.allSettled(promises);
+    });
+
+    it("resolves 20 concurrent sessionCommands correctly", async () => {
+      const { cdp, ws } = createMockCdpConnection();
+      const targetId = "TARGET_TEST_1234";
+      const sessionId = "SESSION_TEST";
+
+      // Start 20 concurrent sessionCommands
+      const promises: Promise<unknown>[] = [];
+      for (let i = 0; i < 20; i++) {
+        promises.push(
+          cdp.sessionCommand(targetId, "Runtime.evaluate", {}, 5000),
+        );
+      }
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Emit 20 responses with ids 1..20
+      for (let i = 1; i <= 20; i++) {
+        ws.emit("message", Buffer.from(JSON.stringify({
+          id: i,
+          sessionId,
+          result: { value: i },
+        })));
+      }
+
+      const results = await Promise.all(promises);
+      assert.equal(results.length, 20);
+      for (let i = 0; i < 20; i++) {
+        assert.deepEqual(results[i], { value: i + 1 });
+      }
+
+      // Verify cleanup
+      const pending = (cdp as unknown as { pending: Map<number, unknown> }).pending;
+      assert.equal(pending.size, 0, "Pending Map should be empty after all resolved");
+      const pendingSession = (cdp as unknown as { pendingSessionCommands: Map<string, Set<number>> }).pendingSessionCommands;
+      assert.ok(!pendingSession.has(targetId) || pendingSession.get(targetId)!.size === 0,
+        "pendingSessionCommands should be empty after all resolved");
+    });
+
+    it("rejects all concurrent sessionCommands on targetDestroyed", async () => {
+      const { cdp, ws } = createMockCdpConnection();
+      const targetId = "TARGET_TEST_1234";
+
+      // Start 15 concurrent sessionCommands
+      const promises: Promise<unknown>[] = [];
+      for (let i = 0; i < 15; i++) {
+        promises.push(
+          cdp.sessionCommand(targetId, "Runtime.evaluate", {}, 10000),
+        );
+      }
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Verify commands are tracked
+      const pendingSession = (cdp as unknown as { pendingSessionCommands: Map<string, Set<number>> }).pendingSessionCommands;
+      assert.ok(pendingSession.has(targetId), "Should have pending commands tracked");
+      assert.equal(pendingSession.get(targetId)!.size, 15, "Should have 15 pending commands");
+
+      // Simulate targetDestroyed
+      ws.emit("message", Buffer.from(JSON.stringify({
+        method: "Target.targetDestroyed",
+        params: { targetId },
+      })));
+
+      // All should be rejected
+      const results = await Promise.allSettled(promises);
+      const rejected = results.filter((r) => r.status === "rejected");
+      assert.equal(rejected.length, 15, "All 15 should be rejected");
+
+      // Verify cleanup
+      assert.ok(!pendingSession.has(targetId), "pendingSessionCommands should be cleaned up");
+      const pending = (cdp as unknown as { pending: Map<number, unknown> }).pending;
+      assert.equal(pending.size, 0, "pending Map should be empty");
     });
   });
 
