@@ -652,10 +652,22 @@ export class CdpConnection {
     let target: CdpTargetInfo | undefined;
 
     if (typeof tabRef === "string") {
+      // "current" resolves to the active tab
+      if (tabRef === "current") {
+        if (this.currentTargetId) {
+          target = targets.find((t) => t.id === this.currentTargetId);
+        }
+        // Fall back to first tab if no current target set
+        if (!target) {
+          target = targets[0];
+        }
+      }
       // Try short ID first
-      const resolvedTargetId = this.tabManager.resolveShortId(tabRef);
-      if (resolvedTargetId) {
-        target = targets.find((t) => t.id === resolvedTargetId);
+      if (!target) {
+        const resolvedTargetId = this.tabManager.resolveShortId(tabRef);
+        if (resolvedTargetId) {
+          target = targets.find((t) => t.id === resolvedTargetId);
+        }
       }
       // Then try full target ID
       if (!target) {

@@ -44,17 +44,8 @@ export async function openCommand(
 
   // 处理 --tab 参数
   if (options.tab !== undefined) {
-    if (options.tab === "current") {
-      // 使用当前活动 tab
-      (request as Record<string, unknown>).tabId = "current";
-    } else {
-      // 使用指定 tabId
-      const tabId = parseInt(options.tab, 10);
-      if (isNaN(tabId)) {
-        throw new Error(`无效的 tabId: ${options.tab}`);
-      }
-      (request as Record<string, unknown>).tabId = tabId;
-    }
+    // 直接传字符串，daemon 的 resolveTarget 支持 shortId / 完整 targetId / 数字索引
+    (request as Record<string, unknown>).tabId = options.tab;
   }
   // 不指定 --tab 时，tabId 为 undefined，扩展会创建新 tab
 
