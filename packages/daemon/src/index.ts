@@ -19,6 +19,7 @@ import { DAEMON_PORT, DAEMON_HOST } from "@bb-browser/shared";
 import { HttpServer } from "./http-server.js";
 import { CdpConnection } from "./cdp-connection.js";
 import { TabStateManager } from "./tab-state.js";
+import { ts } from "./log.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -219,7 +220,7 @@ async function main(): Promise<void> {
     cdpEndpoint = await discoverCdpPort(options.cdpHost, options.cdpPort);
   } catch (error) {
     console.error(
-      `[Daemon] ${error instanceof Error ? error.message : String(error)}`,
+      `[${ts()}] [Daemon] ${error instanceof Error ? error.message : String(error)}`,
     );
     process.exit(1);
   }
@@ -231,7 +232,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.error("[Daemon] Shutting down...");
+    console.error(`[${ts()}] [Daemon] Shutting down...`);
     cdp.disconnect();
     await httpServer.stop();
     cleanupDaemonJson();
@@ -247,8 +248,14 @@ async function main(): Promise<void> {
     onShutdown: shutdown,
   });
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => {
+    console.error(`[${ts()}] [Daemon] Received SIGINT`);
+    shutdown();
+  });
+  process.on("SIGTERM", () => {
+    console.error(`[${ts()}] [Daemon] Received SIGTERM`);
+    shutdown();
+  });
 
   await httpServer.start();
   writeDaemonJson({
@@ -259,26 +266,26 @@ async function main(): Promise<void> {
   });
 
   console.error(
-    `[Daemon] HTTP server listening on http://${options.host}:${options.port}`,
+    `[${ts()}] [Daemon] HTTP server listening on http://${options.host}:${options.port}`,
   );
-  console.error(`[Daemon] Auth token: ${options.token}`);
+  console.error(`[${ts()}] [Daemon] Auth token: ${options.token}`);
 
   // Phase 2: Connect to CDP asynchronously
   console.error(
-    `[Daemon] Connecting to Chrome CDP at ${cdpEndpoint.host}:${cdpEndpoint.port}...`,
+    `[${ts()}] [Daemon] Connecting to Chrome CDP at ${cdpEndpoint.host}:${cdpEndpoint.port}...`,
   );
 
   try {
     await cdp.connect();
     const tabCount = tabManager.tabCount;
     console.error(
-      `[Daemon] CDP connected, monitoring ${tabCount} tab(s)`,
+      `[${ts()}] [Daemon] CDP connected, monitoring ${tabCount} tab(s)`,
     );
   } catch (error) {
     console.error(
-      `[Daemon] Failed to connect to CDP: ${error instanceof Error ? error.message : String(error)}`,
+      `[${ts()}] [Daemon] Failed to connect to CDP: ${error instanceof Error ? error.message : String(error)}`,
     );
-    console.error("[Daemon] HTTP server is running, but commands will fail until CDP connects.");
+    console.error(`[${ts()}] [Daemon] HTTP server is running, but commands will fail until CDP connects.`);
   }
 }
 
@@ -286,7 +293,7 @@ async function main(): Promise<void> {
 // uncaughtException：事件回调中的同步异常（如 JSON.parse 失败）
 // 这些异常会导致进程崩溃，必须记录以便后续调查
 process.on("uncaughtException", (error) => {
-  console.error("[Daemon] Uncaught exception:", error);
+  console.error(`[${ts()}] [Daemon] Uncaught exception:`, error);
   try { cleanupDaemonJson(); } catch {}
   process.exit(1);
 });
@@ -294,11 +301,11 @@ process.on("uncaughtException", (error) => {
 // unhandledRejection：未捕获的 Promise rejection
 // 记录但不退出 — daemon 可能仍能继续工作
 process.on("unhandledRejection", (reason) => {
-  console.error("[Daemon] Unhandled rejection:", reason);
+  console.error(`[${ts()}] [Daemon] Unhandled rejection:`, reason);
 });
 
 main().catch((error) => {
-  console.error("[Daemon] Fatal error:", error);
+  console.error(`[${ts()}] [Daemon] Fatal error:`, error);
   cleanupDaemonJson();
   process.exit(1);
 });
