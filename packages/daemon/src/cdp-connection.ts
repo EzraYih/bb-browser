@@ -11,6 +11,7 @@ import { request as httpRequest } from "node:http";
 import WebSocket from "ws";
 import { TabStateManager } from "./tab-state.js";
 import { COMMAND_TIMEOUT } from "@bb-browser/shared";
+import { ts } from "./log.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -345,6 +346,8 @@ export class CdpConnection {
               });
             }
             // Reject all pending sessionCommands for this target
+            const detachedPending = this.pendingSessionCommands.get(targetId);
+            console.error(`[${ts()}] [CDP] Target detached: targetId=${targetId} pendingCommands=${detachedPending?.size || 0}`);
             this.rejectPendingSessionCommands(targetId, "Target detached");
             this.sessions.delete(targetId);
             this.attachedTargets.delete(sessionId);
@@ -381,6 +384,8 @@ export class CdpConnection {
             });
           }
           // Reject all pending sessionCommands for this target
+          const destroyedPending = this.pendingSessionCommands.get(targetId);
+          console.error(`[${ts()}] [CDP] Target destroyed: targetId=${targetId} pendingCommands=${destroyedPending?.size || 0}`);
           this.rejectPendingSessionCommands(targetId, "Target destroyed");
           const sessionId = this.sessions.get(targetId);
           if (sessionId) {
@@ -404,7 +409,8 @@ export class CdpConnection {
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", (code, reason) => {
+      console.error(`[${ts()}] [CDP] WebSocket closed: code=${code} reason=${reason?.toString() || "none"}`);
       this._connected = false;
       this.socket = null;
       this.lastError = "CDP WebSocket closed unexpectedly";
@@ -432,7 +438,9 @@ export class CdpConnection {
       }
     });
 
-    ws.on("error", () => {});
+    ws.on("error", (error) => {
+      console.error(`[${ts()}] [CDP] WebSocket error: ${error.message}`);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -717,6 +725,7 @@ export class CdpConnection {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending.has(id)) {
+          console.error(`[${ts()}] [CDP] browserCommand timeout: ${method} timeoutMs=${timeoutMs}`);
           this.pending.delete(id);
           reject(new Error(`browserCommand timeout: ${method} after ${timeoutMs}ms`));
         }
@@ -746,6 +755,7 @@ export class CdpConnection {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending.has(id)) {
+          console.error(`[${ts()}] [CDP] sessionCommand timeout: ${method} targetId=${targetId} timeoutMs=${timeoutMs}`);
           this.pending.delete(id);
           const ids = this.pendingSessionCommands.get(targetId);
           if (ids) {
