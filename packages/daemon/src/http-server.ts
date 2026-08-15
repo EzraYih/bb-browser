@@ -16,9 +16,13 @@ import type { Request } from "@bb-browser/shared";
 import { COMMAND_TIMEOUT, DAEMON_PORT } from "@bb-browser/shared";
 import { CdpConnection } from "./cdp-connection.js";
 import { dispatchRequest } from "./command-dispatch.js";
+import { ts } from "./log.js";
 
 /** Maximum request body size (10 MB) — prevents OOM from oversized payloads. */
 const MAX_BODY_SIZE = 10 * 1024 * 1024;
+
+/** Actions that are polled frequently and should not clutter the log. */
+const LOW_NOISE_ACTIONS = new Set(["console", "errors", "network"]);
 
 export interface HttpServerOptions {
   host?: string;
@@ -125,9 +129,13 @@ export class HttpServer {
   // ---------------------------------------------------------------------------
 
   private async handleCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const startTime = Date.now();
+    const reqId = Math.random().toString(36).slice(2, 8);
+    let action = "unknown";
     try {
       const body = await this.readBody(req);
       const request = JSON.parse(body) as Request;
+      action = request.action;
 
       // Wait for CDP to be ready (two-phase startup)
       if (!this.cdp.connected) {
@@ -174,8 +182,12 @@ export class HttpServer {
           dispatchRequest(this.cdp, request),
           cmdTimeoutPromise,
         ]);
+        if (!LOW_NOISE_ACTIONS.has(action)) {
+          console.error(`[${ts()}] [HTTP] ${reqId} ${action} -> 200 ${Date.now() - startTime}ms`);
+        }
         this.sendJson(res, 200, response);
       } catch (error) {
+        console.error(`[${ts()}] [HTTP] ${reqId} ${action} -> 400 ${Date.now() - startTime}ms ${error instanceof Error ? error.message : String(error)}`);
         this.sendJson(res, 400, {
           success: false,
           error: error instanceof Error ? error.message : "Invalid request",
@@ -184,6 +196,7 @@ export class HttpServer {
         clearTimeout(cmdTimer);
       }
     } catch (error) {
+      console.error(`[${ts()}] [HTTP] ${reqId} ${action} -> 400 ${Date.now() - startTime}ms ${error instanceof Error ? error.message : String(error)}`);
       this.sendJson(res, 400, {
         success: false,
         error: error instanceof Error ? error.message : "Invalid request",
@@ -222,6 +235,7 @@ export class HttpServer {
   // ---------------------------------------------------------------------------
 
   private handleShutdown(_req: IncomingMessage, res: ServerResponse): void {
+    console.error(`[${ts()}] [HTTP] POST /shutdown received`);
     this.sendJson(res, 200, { code: 0, message: "Shutting down" });
 
     setTimeout(() => {
@@ -254,11 +268,15 @@ export class HttpServer {
   }
 
   private sendJson(res: ServerResponse, status: number, data: unknown): void {
-    const body = JSON.stringify(data);
-    res.writeHead(status, {
-      "Content-Type": "application/json",
-      "Content-Length": Buffer.byteLength(body),
-    });
-    res.end(body);
+    try {
+      const body = JSON.stringify(data);
+      res.writeHead(status, {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      });
+      res.end(body);
+    } catch (error) {
+      console.error(`[${ts()}] [HTTP] sendJson failed: ${error instanceof Error ? error.message : String(error)} status=${status}`);
+    }
   }
 }
